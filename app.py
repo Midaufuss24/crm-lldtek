@@ -8,13 +8,21 @@ import admin_page
 import services
 
 # Google Sheets configuration
-SHEET_NAME = "2-3-4 DAILY REPORT 10/25"  # TODO: Replace with your actual Google Sheet name
+AVAILABLE_SHEETS = [
+    "TOTAL REPORT 2025",
+    "TOTAL REPORT 2026",
+    "2-3-4 DAILY REPORT 12/25",
+    "2-3-4 DAILY REPORT 01/26"
+]  # TODO: Update with your actual Google Sheet names
 
 # Helper function to load data from Google Sheets
-def load_gsheet_data():
+def load_gsheet_data(selected_sheets):
     """Load data from Google Sheets with error handling"""
+    if not selected_sheets or len(selected_sheets) == 0:
+        return pd.DataFrame()  # Return empty DataFrame if no sheets selected
+    
     try:
-        return services.load_data_from_gsheet(SHEET_NAME)
+        return services.load_data_from_gsheet(selected_sheets)
     except Exception as e:
         st.error(f"❌ Failed to load data from Google Sheets: {str(e)}")
         return pd.DataFrame()  # Return empty DataFrame on error
@@ -101,7 +109,7 @@ def insert_ticket(date, salon_name, phone, issue_category, note, status='Pending
     conn.commit()
     conn.close()
 
-def get_ticket_by_id(ticket_id, df_search_results=None):
+def get_ticket_by_id(ticket_id, df_search_results=None, selected_sheets=None):
     """Lấy thông tin ticket theo ID từ Google Sheets hoặc search results"""
     # If search results DataFrame is provided, use it (for compatibility with search)
     if df_search_results is not None and not df_search_results.empty:
@@ -127,10 +135,14 @@ def get_ticket_by_id(ticket_id, df_search_results=None):
                 'Caller_Info': row.get('Caller_Info', None)
             }
     
+    # Use selected_sheets from session state if not provided
+    if selected_sheets is None:
+        selected_sheets = st.session_state.get('sheet_selection', [])
+    
     # Fallback: Try to load from Google Sheets and search by matching fields
     # This is less reliable since we don't have a real ID, but we'll try to match
     # by a combination of unique fields
-    df = load_gsheet_data()
+    df = load_gsheet_data(selected_sheets)
     if not df.empty and ticket_id <= len(df):
         # Use ticket_id as index (since we generate sequential IDs in search)
         try:
@@ -170,10 +182,14 @@ def update_ticket(ticket_id, status, note):
     conn.commit()
     conn.close()
 
-def search_tickets(search_term, filter_type=None):
+def search_tickets(search_term, filter_type=None, selected_sheets=None):
     """Tìm kiếm tickets theo Salon Name, Phone, CID, hoặc Agent_Name, có thể lọc theo Training/Demo"""
+    # Use selected_sheets from session state if not provided
+    if selected_sheets is None:
+        selected_sheets = st.session_state.get('sheet_selection', [])
+    
     # Load data from Google Sheets
-    df = load_gsheet_data()
+    df = load_gsheet_data(selected_sheets)
     
     if df.empty:
         return df
@@ -215,10 +231,14 @@ def search_tickets(search_term, filter_type=None):
     
     return df_filtered
 
-def get_all_tickets(filter_type=None):
+def get_all_tickets(filter_type=None, selected_sheets=None):
     """Lấy tất cả tickets từ Google Sheets, có thể lọc theo Training/Demo"""
+    # Use selected_sheets from session state if not provided
+    if selected_sheets is None:
+        selected_sheets = st.session_state.get('sheet_selection', [])
+    
     # Load data from Google Sheets
-    df = load_gsheet_data()
+    df = load_gsheet_data(selected_sheets)
     
     if df.empty:
         return df
@@ -248,6 +268,23 @@ init_db()
 
 # Sidebar menu
 st.sidebar.title("🏢 CRM - LLDTEK")
+st.sidebar.markdown("---")
+
+# Data Source Selection (Multi-Sheet Selection)
+st.sidebar.subheader("📂 Select Data Source (Months)")
+selected_sheets = st.sidebar.multiselect(
+    "Select months to load data from:",
+    options=AVAILABLE_SHEETS,
+    default=[AVAILABLE_SHEETS[-1]] if AVAILABLE_SHEETS else [],  # Default to last item (current month)
+    key="sheet_selection"
+)
+
+# Check if no sheets are selected - show message in main area
+if not selected_sheets or len(selected_sheets) == 0:
+    st.sidebar.warning("⚠️ Please select at least one month to view data.")
+    st.info("ℹ️ **Please select at least one month from the sidebar to view data.**")
+    st.stop()  # Stop execution if no sheets selected
+
 st.sidebar.markdown("---")
 
 # Agent selection (Session login)
@@ -340,11 +377,11 @@ if not admin_authenticated:
 # Check if admin is authenticated - show admin dashboard
 if admin_authenticated:
     # Get all tickets data for admin dashboard from Google Sheets
-    df_all_tickets = get_all_tickets()
+    df_all_tickets = get_all_tickets(selected_sheets=selected_sheets)
     if not df_all_tickets.empty:
         admin_page.show_admin_dashboard(df_all_tickets)
     else:
-        st.error("❌ No data available. Please check your Google Sheets configuration.")
+        st.error("❌ No data available. Please check your Google Sheets configuration or select different months.")
 elif page == "🆕 New Ticket":
     st.title("🆕 Tạo Ticket Mới")
     st.markdown("---")
@@ -506,7 +543,7 @@ elif page == "🔍 Search & History":
                 
                 if selected_ticket_display:
                     selected_ticket_id = ticket_options[selected_ticket_display]
-                    ticket_info = get_ticket_by_id(selected_ticket_id, df_search_results=df)
+                    ticket_info = get_ticket_by_id(selected_ticket_id, df_search_results=df, selected_sheets=selected_sheets)
                     
                     if ticket_info:
                         with st.form("update_ticket_form"):
@@ -561,7 +598,7 @@ elif page == "📊 Dashboard":
     st.markdown("---")
     
     # Lấy tất cả dữ liệu từ Google Sheets
-    df = get_all_tickets()
+    df = get_all_tickets(selected_sheets=selected_sheets)
     
     if not df.empty:
         # Chuyển đổi Date sang datetime (dayfirst=False for MM/DD/YYYY format, errors='coerce' để xử lý dữ liệu không hợp lệ)
