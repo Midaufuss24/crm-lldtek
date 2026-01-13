@@ -1,0 +1,15 @@
+# Core Streamlit dependencies
+streamlit>=1.28.0,<2.0.0
+
+# Data processing
+pandas>=2.0.0,<3.0.0
+
+# Visualization
+plotly>=5.17.0,<6.0.0
+
+# Excel file support (required for main.py to read Excel files)
+openpyxl>=3.1.0,<4.0.0
+
+# Google Sheets API support
+gspread>=5.0.0,<6.0.0
+oauth2client>=4.1.3,<5.0.0
