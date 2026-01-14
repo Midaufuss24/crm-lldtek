@@ -13,7 +13,7 @@ AVAILABLE_SHEETS = [
     "TOTAL REPORT 2026",
     "2-3-4 DAILY REPORT 12/25",
     "2-3-4 DAILY REPORT 01/26"
-]  # TODO: Update with your actual Google Sheet names
+]
 
 # Helper function to load data from Google Sheets
 def load_gsheet_data(selected_sheets):
@@ -24,7 +24,6 @@ def load_gsheet_data(selected_sheets):
     try:
         return services.load_data_from_gsheet(selected_sheets)
     except Exception as e:
-        st.error(f"❌ Failed to load data from Google Sheets: {str(e)}")
         return pd.DataFrame()  # Return empty DataFrame on error
 
 # Cấu hình trang
@@ -139,10 +138,9 @@ def get_ticket_by_id(ticket_id, df_search_results=None, selected_sheets=None):
     if selected_sheets is None:
         selected_sheets = st.session_state.get('sheet_selection', [])
     
-    # Fallback: Try to load from Google Sheets and search by matching fields
-    # This is less reliable since we don't have a real ID, but we'll try to match
-    # by a combination of unique fields
+    # Fallback: Try to load from Google Sheets
     df = load_gsheet_data(selected_sheets)
+    
     if not df.empty and ticket_id <= len(df):
         # Use ticket_id as index (since we generate sequential IDs in search)
         try:
@@ -183,7 +181,7 @@ def update_ticket(ticket_id, status, note):
     conn.close()
 
 def search_tickets(search_term, filter_type=None, selected_sheets=None):
-    """Tìm kiếm tickets theo Salon Name, Phone, CID, hoặc Agent_Name, có thể lọc theo Training/Demo"""
+    """Tìm kiếm tickets theo Salon Name, Phone, CID, hoặc Agent_Name"""
     # Use selected_sheets from session state if not provided
     if selected_sheets is None:
         selected_sheets = st.session_state.get('sheet_selection', [])
@@ -232,7 +230,7 @@ def search_tickets(search_term, filter_type=None, selected_sheets=None):
     return df_filtered
 
 def get_all_tickets(filter_type=None, selected_sheets=None):
-    """Lấy tất cả tickets từ Google Sheets, có thể lọc theo Training/Demo"""
+    """Lấy tất cả tickets từ Google Sheets"""
     # Use selected_sheets from session state if not provided
     if selected_sheets is None:
         selected_sheets = st.session_state.get('sheet_selection', [])
@@ -481,7 +479,7 @@ elif page == "🔍 Search & History":
             if 'CID' in df_display.columns:
                 df_display['CID'] = df_display['CID'].fillna('').astype(str).str.replace('nan', '', regex=False)
             
-            # Reorder columns: Date, Agent_Name, Salon_Name, CID, Phone, Issue_Category, Note, Status, then others
+            # Reorder columns
             primary_columns = ['Date', 'Agent_Name', 'Salon_Name', 'CID', 'Phone', 'Issue_Category', 'Note', 'Status']
             other_columns = [col for col in df_display.columns if col not in primary_columns]
             column_order = [col for col in primary_columns if col in df_display.columns] + other_columns
@@ -505,10 +503,6 @@ elif page == "🔍 Search & History":
                     "Support_Time": st.column_config.TextColumn("Thời gian hỗ trợ"),
                     "Caller_Info": "Thông tin người gọi",
                     "CID": "CID",
-                    "Contact": "Người gọi",
-                    "Card_16_Digits": "16 Digits",
-                    "Training_Note": "Training",
-                    "Demo_Note": "Demo",
                     "Created_At": st.column_config.DatetimeColumn("Thời gian tạo", format="DD/MM/YYYY HH:mm:ss")
                 }
             )
@@ -529,7 +523,7 @@ elif page == "🔍 Search & History":
             
             # Chọn ticket để cập nhật
             if 'id' in df.columns:
-                # Tạo danh sách ticket để chọn (hiển thị thông tin ticket)
+                # Tạo danh sách ticket để chọn
                 ticket_options = {}
                 for idx, row in df.iterrows():
                     ticket_display = f"ID {row['id']} - {row['Salon_Name']} - {row['Phone']} - {row['Status']} ({row['Date']})"
@@ -566,7 +560,7 @@ elif page == "🔍 Search & History":
                                 )
                             
                             with col2:
-                                st.write("")  # Spacing
+                                st.write("") # Spacing
                                 st.write("")
                             
                             # Note hiện tại
@@ -582,7 +576,6 @@ elif page == "🔍 Search & History":
                             
                             if submitted:
                                 try:
-                                    # Cập nhật ticket
                                     update_ticket(selected_ticket_id, new_status, new_note)
                                     st.success(f"✅ Đã cập nhật ticket ID {selected_ticket_id} thành công!")
                                     st.rerun()
@@ -599,6 +592,17 @@ elif page == "📊 Dashboard":
     
     # Lấy tất cả dữ liệu từ Google Sheets
     df = get_all_tickets(selected_sheets=selected_sheets)
+
+    # ----------------------------------------------------
+    # 👇 ĐÂY LÀ ĐOẠN CODE KIỂM TRA DỮ LIỆU CHUẨN (ĐÃ FIX)
+    if not df.empty:
+        with st.expander("🛠️ DEBUG - KIỂM TRA DỮ LIỆU GỐC", expanded=True):
+            st.error(f"👇 KẾT QUẢ ĐỌC FILE (Tổng dòng: {len(df)})")
+            st.write("Danh sách cột tìm thấy:", df.columns.tolist())
+            st.dataframe(df.head(5))
+    else:
+        st.error("⚠️ KHÔNG TÌM THẤY DỮ LIỆU! (Hãy kiểm tra lại file Google Sheet)")
+    # ----------------------------------------------------
     
     if not df.empty:
         # Chuyển đổi Date sang datetime (dayfirst=False for MM/DD/YYYY format, errors='coerce' để xử lý dữ liệu không hợp lệ)
@@ -812,10 +816,9 @@ elif page == "🔢 16 Digits":
         df_digits = pd.read_csv('cleaned_16digits.csv')
         
         # Chuyển đổi các cột số thành string để tránh format số học
-        # Đặc biệt là cột Card Last 4 và các cột số khác
         numeric_columns = ['Card Last 4', 'Amount', 'Extra Due', 'Missed Tip', 'Refund', 'Ticket No.']
-        for col in numeric_columns:
-            if col in df_digits.columns:
+        for col in df_digits.columns:
+            if col in numeric_columns:
                 df_digits[col] = df_digits[col].astype(str)
         
         # Xóa các cột Unnamed
