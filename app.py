@@ -9,17 +9,22 @@ from google.oauth2.service_account import Credentials
 import time
 import re
 import pytz
-
-# --- THƯ VIỆN CHẠY NGẦM ---
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
+
+# --- [V63 FIX] SOFT IMPORT (CHỈ NẠP SELENIUM NẾU CÓ) ---
+HAS_SELENIUM = False
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.keys import Keys
+    from webdriver_manager.chrome import ChromeDriverManager
+    HAS_SELENIUM = True
+except ImportError:
+    HAS_SELENIUM = False # Trên Cloud không có thư viện này -> Đặt cờ False
 
 # ==========================================
 # 1. CẤU HÌNH HỆ THỐNG
@@ -117,10 +122,15 @@ def parse_vici_comments(comment_str):
 # 3. SYSTEM SEARCH ENGINE (SMART SWITCH)
 # ==========================================
 def run_search_engine(search_term):
-    # [V62 CHECK] Kiểm tra xem có chìa khóa Web không
+    # Check 1: Môi trường có thư viện Selenium không?
+    if not HAS_SELENIUM:
+        return "CLOUD_MODE" 
+        
+    # Check 2: Có chìa khóa Web không?
     if "web_account" not in st.secrets:
-        return "CLOUD_MODE" # Trả về tín hiệu đang chạy trên Cloud
+        return "CLOUD_MODE"
 
+    # Nếu đủ cả 2 -> Chạy Bot
     chrome_options = Options()
     prefs = {"profile.managed_default_content_settings.images": 2, "profile.default_content_setting_values.notifications": 2}
     chrome_options.add_experimental_option("prefs", prefs)
