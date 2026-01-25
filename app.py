@@ -9,10 +9,10 @@ from google.oauth2.service_account import Credentials
 import time
 import re
 import pytz
-from bs4 import BeautifulSoup
 
-# --- [V63 FIX] SOFT IMPORT (CHỈ NẠP SELENIUM NẾU CÓ) ---
-HAS_SELENIUM = False
+# --- [V64 FIX] SAFE IMPORT (GOM TẤT CẢ THƯ VIỆN BOT VÀO TRY-EXCEPT) ---
+# Nếu thiếu 1 trong các thư viện này, Bot sẽ tự tắt mà không làm sập App
+HAS_BOT_LIBS = False
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
@@ -22,9 +22,10 @@ try:
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.common.keys import Keys
     from webdriver_manager.chrome import ChromeDriverManager
-    HAS_SELENIUM = True
+    from bs4 import BeautifulSoup
+    HAS_BOT_LIBS = True
 except ImportError:
-    HAS_SELENIUM = False # Trên Cloud không có thư viện này -> Đặt cờ False
+    HAS_BOT_LIBS = False # Trên Cloud thiếu thư viện -> Đặt cờ False
 
 # ==========================================
 # 1. CẤU HÌNH HỆ THỐNG
@@ -122,8 +123,8 @@ def parse_vici_comments(comment_str):
 # 3. SYSTEM SEARCH ENGINE (SMART SWITCH)
 # ==========================================
 def run_search_engine(search_term):
-    # Check 1: Môi trường có thư viện Selenium không?
-    if not HAS_SELENIUM:
+    # Check 1: Môi trường có đủ thư viện Bot không?
+    if not HAS_BOT_LIBS:
         return "CLOUD_MODE" 
         
     # Check 2: Có chìa khóa Web không?
@@ -498,7 +499,7 @@ if menu == "🆕 New Ticket":
         if ticket_type == "Report (Hỗ trợ)": st.caption(f"Start Time: {start_time_display}"); note_content = st.text_area("Chi tiết *", height=150)
         elif ticket_type == "Training":
             col_iso, col_other = st.columns([1, 1]); iso_opt = col_iso.selectbox("ISO", ["Spoton", "1ST", "TMS", "TMDSpoton", "Khác"]); iso_val = iso_opt if iso_opt != "Khác" else col_other.text_input("Nhập ISO khác")
-            topics = st.multiselect("Topics:", ["Mainscreen", "APPT", "Guest List", "Payment", "GC", "Report", "Settings"]); detail = st.text_area("Chi tiết:"); train_note = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = st.text_area("Ghi chú chung *", height=100)
+            topics = st.multiselect("Topics:", ["Mainscreen", "APPT", "Guest List", "Payment", "GC", "Report", "Settings"]); detail = st.text_area("Chi tiết:"); train_note = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = st.text_area("Ghi chú chung *", height=100)
         elif ticket_type == "Demo": demo_note = st.text_input("Mục đích"); note_content = st.text_area("Diễn biến *", height=150)
         elif ticket_type == "SMS Refill": st.info("💰 Mua gói SMS"); pkg = st.radio("Gói:", ["$50 (2k)", "$100 (5k)", "$200 (11k)", "$300 (17.5k)"]); c_num = st.text_input("Card Num"); c_exp = st.text_input("EXP"); note_content = f"REFILL SMS: {pkg}"; card_info = f"Pkg: {pkg} | Card: {c_num} | Exp: {c_exp}"
         elif ticket_type == "SMS Drafting": st.info("📝 Soạn SMS"); process = st.text_area("Diễn biến"); draft = st.text_area("Nội dung chốt"); note_content = f"DIỄN BIẾN: {process}\nCHỐT: {draft}"; status_opts = ["Support", "Done"]
@@ -563,7 +564,6 @@ elif menu == "🗂️ Tra cứu Master Data":
                 else:
                     st.warning("Vui lòng nhập từ khóa.")
             
-            # Hiển thị mặc định nếu chưa search
             if not search_term and not df_cid.empty:
                 with st.expander("Xem toàn bộ danh sách Master Data (Cũ)", expanded=False):
                     st.dataframe(df_cid, height=400, use_container_width=True)
