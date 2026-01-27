@@ -3,5 +3,8 @@ pandas
 plotly
 gspread
 google-auth
-pytz
 openpyxl
+beautifulsoup4
+webdriver-manager
+selenium
+lxml

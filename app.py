@@ -1,17 +1,30 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime, timedelta
-import plotly.express as px
-import plotly.graph_objects as go
+from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 import time
 import re
 import pytz
+from urllib.parse import urlencode
 
-# --- [V64 FIX] SAFE IMPORT (GOM TẤT CẢ THƯ VIỆN BOT VÀO TRY-EXCEPT) ---
-# Nếu thiếu 1 trong các thư viện này, Bot sẽ tự tắt mà không làm sập App
+# ==========================================
+# 1. CẤU HÌNH & IMPORT
+# ==========================================
+st.set_page_config(page_title="CRM - LLDTEK", page_icon="🏢", layout="wide")
+
+# --- DATABASE SETUP ---
+def init_db():
+    conn = sqlite3.connect('crm_data.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, Date TEXT, Salon_Name TEXT, Phone TEXT, Issue_Category TEXT, Note TEXT, Status TEXT, Created_At TEXT, CID TEXT, Contact TEXT, Card_16_Digits TEXT, Training_Note TEXT, Demo_Note TEXT, Agent_Name TEXT, Support_Time TEXT, Caller_Info TEXT, ISO_System TEXT, Ticket_Type TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS search_history (id INTEGER PRIMARY KEY AUTOINCREMENT, Search_Term TEXT, Result_Content TEXT, Created_At TEXT, Agent_Name TEXT)''')
+    conn.commit(); conn.close()
+init_db()
+
+# --- CHECK LIBS ---
 HAS_BOT_LIBS = False
 try:
     from selenium import webdriver
@@ -21,46 +34,45 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.common.action_chains import ActionChains
     from webdriver_manager.chrome import ChromeDriverManager
     from bs4 import BeautifulSoup
     HAS_BOT_LIBS = True
 except ImportError:
-    HAS_BOT_LIBS = False # Trên Cloud thiếu thư viện -> Đặt cờ False
+    HAS_BOT_LIBS = False
 
-# ==========================================
-# 1. CẤU HÌNH HỆ THỐNG
-# ==========================================
-st.set_page_config(page_title="CRM - LLDTEK", page_icon="🏢", layout="wide")
+is_cloud_mode = False
+if not HAS_BOT_LIBS or "web_account" not in st.secrets:
+    is_cloud_mode = True
 
-AVAILABLE_SHEETS = [
-    "2-3-4 DAILY REPORT 12/25",
-    "2-3-4 DAILY REPORT 01/26"
-]
-
-MASTER_DB_FILE = "CID Salon"
-SUP_USERS = ["Phương Loan", "Thùy Dung"]
-IGNORED_TAB_NAMES = ["form request", "sheet 4", "sheet4", "request", "request daily", "total", "summary", "copy of", "bản sao"]
-KEEP_COLUMNS = ["Date", "Salon_Name", "Agent_Name", "Phone", "CID", "Owner", "Note", "Status", "Issue_Category", "Support_Time", "End_Time", "Ticket_Type", "Caller_Info", "ISO_System", "Training_Note", "Demo_Note", "Card_16_Digits"]
-
-# --- CSS UI ---
+# --- UI CSS ---
 st.markdown("""
 <style>
     .stApp { font-family: 'Segoe UI', sans-serif; }
     .stTextArea textarea, .stTextInput input { font-family: 'Consolas', monospace; font-weight: 500; border-radius: 5px; }
-    div[data-testid="metric-container"] { background-color: #262730; border: 1px solid #41444e; padding: 15px; border-radius: 8px; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-    div[data-testid="metric-container"] label { color: #d0d0d0 !important; }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #ffffff !important; font-weight: bold; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; }
-    .stTabs [data-baseweb="tab"] { height: 45px; border-radius: 5px; font-weight: 600; color: #e0e0e0; background-color: #262730; border: 1px solid #41444e; }
-    .stTabs [aria-selected="true"] { background-color: #ff4b4b !important; color: white; border-color: #ff4b4b !important; }
-    div[data-testid="stDataFrame"] { border: 1px solid #41444e; border-radius: 5px; }
-    .timer-box { padding: 10px; border-radius: 5px; background-color: #1e3a8a; color: white; text-align: center; font-weight: bold; margin-bottom: 10px; }
     div[data-testid="stTextInput"] input[aria-label="⚡ Nhập CID (Auto-Fill & Check):"] { border: 2px solid #ff4b4b; background-color: #fff0f0; color: black; font-weight: bold; }
     .info-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 15px; margin-bottom: 10px; height: 100%; }
     .info-title { color: #ff4b4b; font-weight: bold; font-size: 1.1em; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 5px; }
     .info-content { color: #e0e0e0; font-size: 0.95em; white-space: pre-wrap; }
+    .confirm-box { border: 2px solid #ff4b4b; padding: 20px; border-radius: 10px; background-color: #2b2b2b; text-align: center; margin-bottom: 20px; }
+    
+    /* VICI Full Info Box - FIXED */
+    .vici-container { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border: 1px solid #d6d6d6; color: #31333F; margin-bottom: 20px; }
+    .vici-header { font-size: 1.1em; font-weight: bold; color: #ff4b4b; margin-bottom: 10px; text-transform: uppercase; border-bottom: 2px solid #ff4b4b; display: inline-block; }
+    .vici-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .vici-item { background: white; padding: 8px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .vici-label { font-size: 0.85em; color: #666; font-weight: bold; display: block; margin-bottom: 2px; }
+    .vici-value { font-size: 1em; color: #000; font-weight: 500; word-break: break-word; }
+    
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
+
+AVAILABLE_SHEETS = ["2-3-4 DAILY REPORT 12/25", "2-3-4 DAILY REPORT 01/26"]
+MASTER_DB_FILE = "CID Salon"
+SUP_USERS = ["Phương Loan", "Thùy Dung"]
+IGNORED_TAB_NAMES = ["form request", "sheet 4", "sheet4", "request", "request daily", "total", "summary", "copy of", "bản sao"]
+KEEP_COLUMNS = ["Date", "Salon_Name", "Agent_Name", "Phone", "CID", "Owner", "Note", "Status", "Issue_Category", "Support_Time", "End_Time", "Ticket_Type", "Caller_Info", "ISO_System", "Training_Note", "Demo_Note", "Card_16_Digits"]
 
 # ==========================================
 # 2. HELPER FUNCTIONS
@@ -116,116 +128,124 @@ def parse_vici_comments(comment_str):
     if match:
         cid = match.group(1)
         name = clean_str[:match.start()].strip()
+        name = name.rstrip(' -|:')
         return name, cid
-    return "", ""
+    return clean_str, ""
 
 # ==========================================
-# 3. SYSTEM SEARCH ENGINE (SMART SWITCH)
+# 3. BOT SEARCH ENGINE (V108 LOGIC)
 # ==========================================
+def extract_final_data(driver, search_term):
+    try:
+        html = driver.page_source
+        dfs = pd.read_html(html)
+        if dfs:
+            for df in dfs:
+                str_df = df.astype(str).sum(axis=1)
+                if str_df.str.contains(search_term, case=False).any():
+                     final_rows = df[str_df.str.contains(search_term, case=False)]
+                     return final_rows
+            return max(dfs, key=lambda x: x.shape[1])
+        return None
+    except: return None
+
 def run_search_engine(search_term):
-    # Check 1: Môi trường có đủ thư viện Bot không?
-    if not HAS_BOT_LIBS:
-        return "CLOUD_MODE" 
-        
-    # Check 2: Có chìa khóa Web không?
-    if "web_account" not in st.secrets:
-        return "CLOUD_MODE"
-
-    # Nếu đủ cả 2 -> Chạy Bot
+    if is_cloud_mode: return "CLOUD_MODE"
+    status_log = st.empty()
     chrome_options = Options()
-    prefs = {"profile.managed_default_content_settings.images": 2, "profile.default_content_setting_values.notifications": 2}
-    chrome_options.add_experimental_option("prefs", prefs)
+    chrome_options.add_argument("--headless=new") 
+    chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--ignore-certificate-errors")
     chrome_options.add_argument("--ignore-ssl-errors")
-    chrome_options.add_argument("--allow-running-insecure-content")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    
+    driver = None
     try:
-        driver.get("https://lldtek.org"); wait = WebDriverWait(driver, 20)
+        status_log.info("🚀 Đang kết nối hệ thống...")
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        wait = WebDriverWait(driver, 20) 
+        driver.get("https://www.lldtek.org/salon/login")
         try:
-            login_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Login')]")))
-            login_btn.click(); time.sleep(2)
-        except: pass 
-
-        user_input = None; pass_input = None
+            user_in = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+            pass_in = driver.find_element(By.NAME, "password")
+            user_in.send_keys(st.secrets["web_account"]["username"])
+            pass_in.send_keys(st.secrets["web_account"]["password"])
+            pass_in.submit() 
+            time.sleep(2)
+        except: driver.quit(); return None
+        status_log.info("🔍 Đang tra cứu thông tin...")
+        driver.get("https://lldtek.org/salon/web/pos/list")
+        time.sleep(3) 
         try:
-            inputs = driver.find_elements(By.TAG_NAME, "input")
-            for i in inputs:
-                t = i.get_attribute("type")
-                if t == "text" or t == "email": 
-                    if not user_input: user_input = i
-                elif t == "password": pass_input = i
-            if not user_input and len(inputs) > 0: user_input = inputs[0]
-            if not pass_input and len(inputs) > 1: pass_input = inputs[1]
-        except: pass
-
-        if user_input and pass_input:
-            user_input.send_keys(st.secrets["web_account"]["username"])
-            pass_input.send_keys(st.secrets["web_account"]["password"])
-            time.sleep(0.5)
-            try: pass_input.submit()
-            except:
-                buttons = driver.find_elements(By.TAG_NAME, "button")
-                for btn in buttons:
-                    if "submit" in btn.text.lower():
-                        btn.click(); break
-        else: return None
-
-        time.sleep(3); driver.get("https://lldtek.org/salon/web/pos/list")
-        try:
-            search_box = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@placeholder='Search']")))
-            search_box.clear(); search_box.send_keys(search_term); time.sleep(0.5); search_box.send_keys(Keys.ENTER)
-            try:
-                search_btns = driver.find_elements(By.TAG_NAME, "button")
-                for btn in search_btns:
-                    if "search" in btn.text.lower():
-                        btn.click(); break
-            except: pass
-        except: return None
-            
-        time.sleep(4); soup = BeautifulSoup(driver.page_source, 'html.parser')
-        all_tables = soup.find_all('table'); target_table = None; max_rows = 0
-        for tbl in all_tables:
-            rows_count = len(tbl.find_all('tr'))
-            if rows_count > max_rows:
-                headers_text = tbl.get_text().lower()
-                if "cid" in headers_text or "name" in headers_text or "phone" in headers_text:
-                    max_rows = rows_count; target_table = tbl
-        
-        if target_table:
-            headers = []
-            header_row = target_table.find('thead')
-            if header_row:
-                for th in header_row.find_all(['th', 'td']): headers.append(th.get_text(strip=True))
+            all_inputs = driver.find_elements(By.XPATH, "//body//input[not(ancestor::header) and not(ancestor::nav)]")
+            filled_count = 0
+            for i in all_inputs:
+                try:
+                    if not i.is_displayed(): continue
+                    t = str(i.get_attribute("type")).lower()
+                    ph = str(i.get_attribute("placeholder")).lower()
+                    date_keywords = ["date", "mm/dd", "yyyy", "calendar", "picker", "from", "to"]
+                    if t not in ["text", "search"] or any(dw in ph for dw in date_keywords): continue
+                    driver.execute_script("arguments[0].style.border='3px solid red'", i)
+                    i.click(); i.clear(); i.send_keys(search_term); 
+                    filled_count += 1
+                    try:
+                        neighbor_btn = i.find_element(By.XPATH, "./following::button[1]")
+                        if neighbor_btn.is_displayed():
+                            driver.execute_script("arguments[0].style.border='4px solid blue'", neighbor_btn)
+                            driver.execute_script("arguments[0].click();", neighbor_btn)
+                    except: pass
+                    time.sleep(0.2)
+                except: pass
+            status_log.info("⏳ Đang xử lý dữ liệu từ máy chủ...")
+            time.sleep(6) 
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            if search_term in body_text:
+                status_log.success("✅ Đã tìm thấy dữ liệu!")
+                final_df = extract_final_data(driver, search_term)
+                driver.quit()
+                return final_df
             else:
-                first_tr = target_table.find('tr')
-                if first_tr:
-                    for th in first_tr.find_all(['th', 'td']): headers.append(th.get_text(strip=True))
-            rows = []
-            tbody = target_table.find('tbody')
-            data_rows = tbody.find_all('tr') if tbody else target_table.find_all('tr')[1:]
-            for tr in data_rows:
-                cells = tr.find_all('td')
-                if len(cells) > 0:
-                    row_data = [td.get_text(strip=True) for td in cells]
-                    if len(row_data) == 1 and "no data" in row_data[0].lower(): continue
-                    rows.append(row_data)
-            if rows:
-                if len(headers) != len(rows[0]): headers = [f"Col_{i+1}" for i in range(len(rows[0]))]
-                return pd.DataFrame(rows, columns=headers)
-            else: return pd.DataFrame()
-        else: return None
-    except Exception: return None
-    finally: driver.quit()
+                 status_log.warning("⚠️ Không tìm thấy kết quả phù hợp.")
+            driver.quit(); status_log.empty(); return pd.DataFrame()
+        except Exception as e:
+            st.error(f"❌ Lỗi xử lý: {str(e)}")
+            if driver: driver.quit()
+            return None
+    except Exception as e:
+        st.error(f"❌ Lỗi Bot: {str(e)}")
+        if driver: driver.quit()
+        return None
+
+def save_to_master_db_gsheet(df):
+    try:
+        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+        gc = gspread.authorize(credentials)
+        sh = gc.open(MASTER_DB_FILE) 
+        try: ws = sh.worksheet("CID")
+        except: return False, "Không tìm thấy sheet 'CID' trong file."
+        count = 0
+        for index, row in df.iterrows():
+            row_str = row.astype(str).tolist()
+            name_val, cid_val, agent_val = "N/A", "N/A", "N/A"
+            try:
+                for col in df.columns:
+                    c_lower = str(col).lower()
+                    val = str(row[col])
+                    if "name" in c_lower or "salon" in c_lower: name_val = val
+                    if "cid" in c_lower or "code" in c_lower or "id" in c_lower: cid_val = val
+                    if "agent" in c_lower or "sale" in c_lower or "rep" in c_lower: agent_val = val
+            except: pass
+            if name_val == "N/A" and len(row_str) > 0: name_val = row_str[0]
+            if cid_val == "N/A" and len(row_str) > 1: cid_val = row_str[1]
+            if agent_val == "N/A" and len(row_str) > 2: agent_val = row_str[2]
+            ws.append_row([str(name_val), str(cid_val), str(agent_val)])
+            count += 1
+        return True, f"Đã lưu {count} dòng vào sheet CID."
+    except Exception as e: return False, str(e)
 
 # ==========================================
-# 4. GOOGLE SHEET SYNC
+# 4. GOOGLE SHEET & FORMATTING
 # ==========================================
 def get_target_worksheet(date_obj):
     month_year_1 = date_obj.strftime("%m/%y"); month_year_2 = f"{date_obj.month}/{date_obj.strftime('%y')}"
@@ -244,8 +264,15 @@ def get_target_worksheet(date_obj):
 
 def apply_full_format(ws, row_idx, color_type):
     colors = {'red': {"red": 1.0, "green": 0.0, "blue": 0.0}, 'blue': {"red": 0.0, "green": 0.0, "blue": 1.0}, 'black': {"red": 0.0, "green": 0.0, "blue": 0.0}}
-    fmt_spec = {"textFormat": {"fontFamily": "Times New Roman", "fontSize": 12, "foregroundColor": colors.get(color_type, colors['black'])}, "verticalAlignment": "MIDDLE"}
-    try: ws.format(f"B{row_idx}:K{row_idx}", fmt_spec)
+    fmt_base = {"textFormat": {"fontFamily": "Times New Roman", "fontSize": 12, "foregroundColor": colors.get(color_type, colors['black'])}, "verticalAlignment": "BOTTOM"}
+    fmt_center = fmt_base.copy(); fmt_center["horizontalAlignment"] = "CENTER"; fmt_center["wrapStrategy"] = "WRAP"
+    fmt_left_clip = fmt_base.copy(); fmt_left_clip["horizontalAlignment"] = "LEFT"; fmt_left_clip["wrapStrategy"] = "CLIP"
+    fmt_left_wrap = fmt_base.copy(); fmt_left_wrap["horizontalAlignment"] = "LEFT"; fmt_left_wrap["wrapStrategy"] = "WRAP"
+    try:
+        ws.format(f"B{row_idx}:K{row_idx}", fmt_center)
+        ws.format(f"B{row_idx}:C{row_idx}", fmt_left_clip)
+        ws.format(f"F{row_idx}", fmt_left_wrap)
+        ws.format(f"J{row_idx}:K{row_idx}", fmt_left_wrap)
     except: pass
 
 def save_to_google_sheet(ticket_data):
@@ -264,7 +291,8 @@ def save_to_google_sheet(ticket_data):
         if ticket_data['Ticket_Type'] == "Request (16 Digits)": full_note = ticket_data['Card_16_Digits'] + " | " + full_note
         row_data = [ticket_data['Agent_Name'], ticket_data['Support_Time'], ticket_data['End_Time'], "", ticket_data['Salon_Name'], ticket_data['CID'], ticket_data['Phone'], ticket_data['Caller_Info'], full_note, ticket_data['Status']]
         target_ws.update(f"B{target_row_idx}:K{target_row_idx}", [row_data])
-        status_val = ticket_data['Status']; color = 'red' if "Support" in status_val else 'black'; apply_full_format(target_ws, target_row_idx, color)
+        status_val = ticket_data['Status']; color = 'red' if "Support" in status_val else 'black'
+        apply_full_format(target_ws, target_row_idx, color)
         return True, f"✅ Đã điền vào dòng **{target_row_idx}** (STT: {current_stt})"
     except Exception as e: return False, f"❌ Lỗi: {str(e)}"
 
@@ -282,25 +310,14 @@ def update_google_sheet_row(date_str, phone, salon_name, new_status, new_note):
                 if phone in row_phone and salon_name in row_salon: target_row_idx = idx + 1; break
         if target_row_idx != -1:
             target_ws.update_cell(target_row_idx, 10, new_note); target_ws.update_cell(target_row_idx, 11, new_status)
-            color = 'blue' if "Done" in new_status else ('red' if "Support" in new_status else 'black'); apply_full_format(target_ws, target_row_idx, color)
+            color = 'blue' if "Done" in new_status else ('red' if "Support" in new_status else 'black')
+            apply_full_format(target_ws, target_row_idx, color)
             return True, f"✅ Đã cập nhật (Dòng {target_row_idx})"
         else: return False, f"⚠️ Không tìm thấy dòng khớp"
     except Exception as e: return False, f"❌ Lỗi Update: {str(e)}"
 
-def update_confirmation_note(cid, new_note):
-    try:
-        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
-        gc = gspread.authorize(credentials); sh = gc.open(MASTER_DB_FILE)
-        ws = sh.worksheet("CONFIRMATION")
-        cell = ws.find(cid)
-        if cell:
-            ws.update_cell(cell.row, 5, new_note)
-            return True, "✅ Đã cập nhật Note thành công!"
-        else: return False, "⚠️ Không tìm thấy CID này."
-    except Exception as e: return False, f"❌ Lỗi: {str(e)}"
-
 # ==========================================
-# 5. LOAD DATA & MASTER DB
+# 5. LOAD DATA & GLOBAL
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def load_gsheet_data(selected_sheets):
@@ -340,8 +357,7 @@ def load_master_db():
         try: 
             ws_cid = sh.worksheet("CID"); raw_cid = ws_cid.get_all_values()
             if len(raw_cid) > 1:
-                headers = clean_headers(raw_cid[0])
-                master_data['CID'] = pd.DataFrame(raw_cid[1:], columns=headers)
+                headers = clean_headers(raw_cid[0]); master_data['CID'] = pd.DataFrame(raw_cid[1:], columns=headers)
             else: master_data['CID'] = pd.DataFrame()
         except: master_data['CID'] = pd.DataFrame()
         try: ws_note = sh.worksheet("NOTE"); master_data['NOTE'] = pd.DataFrame(ws_note.get_all_values())
@@ -349,8 +365,7 @@ def load_master_db():
         try: 
             ws_conf = sh.worksheet("CONFIRMATION"); raw_conf = ws_conf.get_all_values()
             if len(raw_conf) > 1:
-                headers = clean_headers(raw_conf[1]) 
-                master_data['CONFIRMATION'] = pd.DataFrame(raw_conf[2:], columns=headers) 
+                headers = clean_headers(raw_conf[1]); master_data['CONFIRMATION'] = pd.DataFrame(raw_conf[2:], columns=headers) 
             else: master_data['CONFIRMATION'] = pd.DataFrame()
         except: master_data['CONFIRMATION'] = pd.DataFrame()
         try: 
@@ -392,7 +407,15 @@ def get_saved_agent_from_db(agent_list):
     c.execute("SELECT value FROM settings WHERE key='current_agent'"); result = c.fetchone(); conn.close()
     return agent_list.index(result[0]) if result and result[0] in agent_list else 0
 
-init_db()
+def update_confirmation_note(cid, new_note):
+    try:
+        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+        gc = gspread.authorize(credentials); sh = gc.open(MASTER_DB_FILE)
+        ws = sh.worksheet("CONFIRMATION")
+        cell = ws.find(cid)
+        if cell: ws.update_cell(cell.row, 5, new_note); return True, "✅ Đã cập nhật Note thành công!"
+        else: return False, "⚠️ Không tìm thấy CID này."
+    except Exception as e: return False, f"❌ Lỗi: {str(e)}"
 
 # ==========================================
 # 6. GIAO DIỆN CHÍNH
@@ -400,9 +423,10 @@ init_db()
 st.sidebar.title("🏢 CRM - LLDTEK")
 if st.sidebar.button("🔄 Cập nhật Dữ liệu Mới"): st.cache_data.clear(); st.rerun()
 
+# --- LOAD DATA GLOBAL ---
 default_sheets = get_current_month_sheet()
 sheets = st.sidebar.multiselect("Dữ liệu Report:", AVAILABLE_SHEETS, default=default_sheets)
-df = load_gsheet_data(sheets)
+df = load_gsheet_data(sheets) # Load df ở đây để toàn app dùng được
 
 st.sidebar.markdown("---")
 agents = ["Phương Loan", "Hương Giang", "Phương Anh", "Tuấn Võ", "Thùy Dung", "Phương Hồ", "Chiến Phạm", "Anh Đạt", "Tiến Dương", "Schang Sanh", "Tuyết Anh", "Liên Chi", "Anh Thư"]
@@ -414,111 +438,110 @@ menu_options = ["🆕 New Ticket", "🗂️ Tra cứu Master Data", "🔍 Search
 if sel_agent in SUP_USERS: menu_options.append("📊 Dashboard (SUP Only)")
 menu = st.sidebar.selectbox("Menu", menu_options)
 
+# --- SESSION STATE ---
+keys_to_init = ["ticket_phone", "ticket_salon", "ticket_cid", "ticket_owner", "ticket_note", "ticket_start_time"]
+for k in keys_to_init:
+    if k not in st.session_state: st.session_state[k] = "" if k != "ticket_start_time" else None
+
+def reset_form():
+    st.session_state.ticket_phone = ""; st.session_state.ticket_salon = ""; st.session_state.ticket_cid = ""
+    st.session_state.ticket_owner = ""; st.session_state.ticket_note = ""; st.session_state.ticket_start_time = None
+
+@st.dialog("⚠️ XÁC NHẬN LƯU TICKET")
+def confirm_save_dialog(data_pack):
+    st.markdown(f"""<div style="text-align: center;"><h3 style="color: #4CAF50;">{data_pack['Salon_Name']}</h3><p><b>SĐT:</b> {data_pack['Phone']} | <b>Trạng thái:</b> {data_pack['Status']}</p><hr><p style="text-align: left;"><b>Nội dung:</b><br>{data_pack['Note']}</p></div>""", unsafe_allow_html=True)
+    if st.button("✅ ĐỒNG Ý LƯU & CLEAR FORM", type="primary", use_container_width=True):
+        insert_ticket(data_pack['Date_Str'], data_pack['Salon_Name'], data_pack['Phone'], data_pack['Note'], data_pack['Note'], data_pack['Status'], data_pack['CID'], data_pack['Agent_Name'], data_pack['Support_Time'], data_pack['Caller_Info'], data_pack['Ticket_Type'], "", data_pack['Training_Note'], "", data_pack['Card_16_Digits'])
+        with st.spinner("⏳ Đang đồng bộ Google Sheet..."):
+            success, msg = save_to_google_sheet(data_pack)
+        if success: st.toast("✅ Lưu thành công!", icon="✨"); reset_form(); time.sleep(1); st.rerun()
+        else: st.error(f"Lỗi GSheet: {msg}")
+
 if menu == "🆕 New Ticket":
     st.title("🆕 Tạo Ticket Mới")
     houston_now = get_company_time()
-    
-    if "ticket_start_time" not in st.session_state or st.session_state.ticket_start_time is None:
-        st.session_state.ticket_start_time = houston_now
+    if st.session_state.ticket_start_time is None: st.session_state.ticket_start_time = houston_now
     start_time_display = format_excel_time(st.session_state.ticket_start_time)
     st.markdown(f"""<div class="timer-box">⏱️ TICKET ĐANG GHI NHẬN TỪ: {start_time_display} (Houston)</div>""", unsafe_allow_html=True)
     
+    qp = st.query_params
+    
+    # FORCE SYNC LOGIC
+    if qp.get("phone"):
+        vici_phone = qp.get("phone")
+        if vici_phone != st.session_state.ticket_phone:
+            st.session_state.ticket_phone = vici_phone
+            if qp.get("comments"):
+                p_name, p_cid = parse_vici_comments(qp.get("comments"))
+                st.session_state.ticket_salon = p_name
+                st.session_state.ticket_cid = p_cid
+            st.session_state.ticket_note = ""
+            st.session_state.ticket_owner = qp.get("user", "") 
+            st.rerun()
+
+    if qp:
+        with st.expander("🕵️ Dữ liệu gốc từ VICI (Để đối chiếu)", expanded=True):
+            # Lấy thông tin từ URL
+            v_name = f"{qp.get('first_name', '')} {qp.get('last_name', '')}".strip()
+            v_address = qp.get('address', '')
+            v_city = qp.get('city', '')
+            v_state = qp.get('state', '')
+            v_zip = qp.get('zip', '')
+            v_email = qp.get('email', '')
+            v_vendor = qp.get('vendor_id', '')
+            v_comments = qp.get('comments', '')
+
+            # Sử dụng HTML không thụt dòng (No Indentation) để tránh lỗi Render
+            html_content = f"""
+<div class="vici-container">
+    <div class="vici-header">📡 Dữ liệu từ VICI Dial</div>
+    <div class="vici-grid">
+        <div class="vici-item"><span class="vici-label">👤 Tên Khách:</span><span class="vici-value">{v_name if v_name else "---"}</span></div>
+        <div class="vici-item"><span class="vici-label">📞 Phone:</span><span class="vici-value">{qp.get('phone', '---')}</span></div>
+        <div class="vici-item"><span class="vici-label">🆔 Vendor ID:</span><span class="vici-value">{v_vendor if v_vendor else "---"}</span></div>
+        <div class="vici-item"><span class="vici-label">🏠 Address:</span><span class="vici-value">{v_address if v_address else "---"}</span></div>
+        <div class="vici-item"><span class="vici-label">🏙️ City/State:</span><span class="vici-value">{v_city}, {v_state} {v_zip}</span></div>
+        <div class="vici-item"><span class="vici-label">📧 Email:</span><span class="vici-value">{v_email if v_email else "---"}</span></div>
+        <div class="vici-item" style="grid-column: span 3;"><span class="vici-label">📝 Comments:</span><span class="vici-value">{v_comments if v_comments else "---"}</span></div>
+    </div>
+</div>
+"""
+            st.markdown(html_content, unsafe_allow_html=True)
+
     col_af1, col_af2 = st.columns([1, 2])
     auto_cid = col_af1.text_input("⚡ Nhập CID (Auto-Fill & Check):", placeholder="VD: 07562")
-    
-    if "auto_fill_salon" not in st.session_state: st.session_state.auto_fill_salon = ""
-    if "auto_fill_cid" not in st.session_state: st.session_state.auto_fill_cid = ""
-
-    if auto_cid and auto_cid != st.session_state.auto_fill_cid:
-        master_data = load_master_db()
-        df_cid = master_data.get('CID', pd.DataFrame())
-        found_info = False
-        if not df_cid.empty:
+    if auto_cid and st.session_state.ticket_cid != auto_cid:
+         st.session_state.ticket_cid = auto_cid
+         master_data = load_master_db(); df_cid = master_data.get('CID', pd.DataFrame())
+         if not df_cid.empty:
             mask = df_cid.iloc[:, 1].astype(str).str.strip().str.contains(auto_cid.strip(), case=False, na=False)
             res = df_cid[mask]
-            if not res.empty:
-                found_salon = res.iloc[0, 0]
-                st.session_state.auto_fill_salon = str(found_salon)
-                st.session_state.auto_fill_cid = auto_cid
-                found_info = True
-                st.success(f"✅ Đã tìm thấy: **{found_salon}**")
-        if not found_info:
-            st.warning("⚠️ Không tìm thấy Info."); st.session_state.auto_fill_salon = ""; st.session_state.auto_fill_cid = auto_cid
+            if not res.empty: st.session_state.ticket_salon = str(res.iloc[0, 0]); st.success(f"✅ Auto-Fill: {st.session_state.ticket_salon}")
 
-        df_conf = master_data.get('CONFIRMATION', pd.DataFrame())
-        if not df_conf.empty:
-            found_warning = False
-            for idx, row in df_conf.iterrows():
-                if len(row) > 2:
-                    cell_cid = str(row[2]).strip()
-                    if auto_cid.strip() in cell_cid and auto_cid.strip() != "":
-                        note_content = str(row[4]) if len(row) > 4 else "Không có nội dung"
-                        st.error(f"🔥 CẢNH BÁO ĐẶC BIỆT: {note_content}")
-                        found_warning = True
-            if not found_warning: st.success("✅ Tiệm này không có cảnh báo đặc biệt (CONFIRMATION).")
-
-        if not df.empty and 'Date_Obj' in df.columns:
-            today_str = houston_now.strftime('%m/%d/%Y')
-            df['Date_Str'] = df['Date_Obj'].dt.strftime('%m/%d/%Y')
-            mask_today = (df['Date_Str'] == today_str) & (df['CID'].astype(str).str.contains(auto_cid.strip(), case=False, na=False))
-            df_dup = df[mask_today]
-            if not df_dup.empty:
-                st.info(f"ℹ️ Tiệm này đã có **{len(df_dup)}** ticket hôm nay:")
-                st.dataframe(df_dup[['Support_Time', 'Agent_Name', 'Status', 'Note']], use_container_width=True)
-
-    qp = st.query_params; def_phone = qp.get("phone", ""); def_comments = qp.get("comments", "")
-    
-    def_salon = st.session_state.auto_fill_salon if st.session_state.auto_fill_salon else ""
-    def_cid = st.session_state.auto_fill_cid if st.session_state.auto_fill_cid else ""
-
-    if not def_salon and def_comments:
-        parsed_name, parsed_cid = parse_vici_comments(def_comments)
-        def_salon = parsed_name
-        if not def_cid: def_cid = parsed_cid
-
-    if not def_cid: def_cid = qp.get("cid", "")
-    def_owner = qp.get("owner", "")
-
-    with st.expander("🔍 Dữ liệu gốc từ VICI (Bấm để xem/backup)", expanded=False):
-        c_raw1, c_raw2 = st.columns(2); 
-        c_raw1.text(f"Raw Comments: {def_comments}")
-        c_raw2.text(f"Parsed Name: {def_salon}")
-        c_raw2.text(f"Parsed CID: {def_cid}")
-
-    if def_phone: st.success(f"📞 VICI CONNECTED: **{def_salon}** - {def_phone}")
-    st.markdown("---")
-    
     if not sel_agent: st.warning("⚠️ Vui lòng chọn Tên Nhân Viên trước!"); st.stop()
     ticket_type = st.radio("Loại:", ["Report (Hỗ trợ)", "Training", "Demo", "SMS Refill", "SMS Drafting", "Request (16 Digits)"], horizontal=True)
-    st.markdown("---")
+    c1, c2, c3 = st.columns([1, 2.5, 1]); d = c1.date_input("📅 Ngày", houston_now); salon = c2.text_input("🏠 Tên Tiệm", key="ticket_salon"); cid = c3.text_input("🆔 CID", key="ticket_cid")
+    c4, c5 = st.columns(2); phone = c4.text_input("📞 Phone *", key="ticket_phone"); caller = c5.text_input("👤 Owner/Caller", key="ticket_owner")
+    iso_val, train_note, demo_note, card_info, note_content = "", "", "", "", ""
+    status_opts = ["Support", "Done", "No Answer"]
+    if ticket_type == "Report (Hỗ trợ)": note_content = st.text_area("Chi tiết *", height=150, key="ticket_note")
+    elif ticket_type == "Training": 
+        col_iso, col_other = st.columns([1, 1]); iso_opt = col_iso.selectbox("ISO", ["Spoton", "1ST", "TMS", "TMDSpoton", "Khác"]); iso_val = iso_opt if iso_opt != "Khác" else col_other.text_input("Nhập ISO khác")
+        topics = st.multiselect("Topics:", ["Mainscreen", "APPT", "Guest List", "Payment", "GC", "Report", "Settings"]); detail = st.text_area("Chi tiết:"); train_note = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = st.text_area("Ghi chú chung *", height=100, key="ticket_note")
+    elif ticket_type == "Demo": demo_note = st.text_input("Mục đích"); note_content = st.text_area("Diễn biến *", height=150, key="ticket_note")
+    elif ticket_type == "SMS Refill": st.info("💰 Mua gói SMS"); pkg = st.radio("Gói:", ["$50 (2k)", "$100 (5k)", "$200 (11k)", "$300 (17.5k)"]); c_num = st.text_input("Card Num"); c_exp = st.text_input("EXP"); note_content = f"REFILL SMS: {pkg}"; card_info = f"Pkg: {pkg} | Card: {c_num} | Exp: {c_exp}"
+    elif ticket_type == "SMS Drafting": st.info("📝 Soạn SMS"); process = st.text_area("Diễn biến"); draft = st.text_area("Nội dung chốt"); note_content = f"DIỄN BIẾN: {process}\nCHỐT: {draft}"; status_opts = ["Support", "Done"]
+    elif ticket_type == "Request (16 Digits)": mid = st.text_input("MID"); amt = st.text_input("Amount"); note_content = f"MID: {mid} | Amt: {amt}"; status_opts = ["Request", "Forwarded", "Support", "Done"]
+    st.markdown("---"); status = st.selectbox("📌 Trạng thái", status_opts)
     
-    with st.form("new_ticket_form", clear_on_submit=False): 
-        c1, c2, c3 = st.columns([1, 2.5, 1]); d = c1.date_input("📅 Ngày", houston_now); salon = c2.text_input("🏠 Tên Tiệm", value=def_salon); cid = c3.text_input("🆔 CID", value=def_cid)
-        c4, c5 = st.columns(2); phone = c4.text_input("📞 Phone *", value=def_phone); caller = c5.text_input("👤 Owner/Caller", value=def_owner)
-        iso_val, train_note, demo_note, card_info, note_content = "", "", "", "", ""; status_opts = ["Support", "Done", "No Answer"]
-        if ticket_type == "Report (Hỗ trợ)": st.caption(f"Start Time: {start_time_display}"); note_content = st.text_area("Chi tiết *", height=150)
-        elif ticket_type == "Training":
-            col_iso, col_other = st.columns([1, 1]); iso_opt = col_iso.selectbox("ISO", ["Spoton", "1ST", "TMS", "TMDSpoton", "Khác"]); iso_val = iso_opt if iso_opt != "Khác" else col_other.text_input("Nhập ISO khác")
-            topics = st.multiselect("Topics:", ["Mainscreen", "APPT", "Guest List", "Payment", "GC", "Report", "Settings"]); detail = st.text_area("Chi tiết:"); train_note = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = f"Topics: {', '.join(topics)} | Note: {detail}"; note_content = st.text_area("Ghi chú chung *", height=100)
-        elif ticket_type == "Demo": demo_note = st.text_input("Mục đích"); note_content = st.text_area("Diễn biến *", height=150)
-        elif ticket_type == "SMS Refill": st.info("💰 Mua gói SMS"); pkg = st.radio("Gói:", ["$50 (2k)", "$100 (5k)", "$200 (11k)", "$300 (17.5k)"]); c_num = st.text_input("Card Num"); c_exp = st.text_input("EXP"); note_content = f"REFILL SMS: {pkg}"; card_info = f"Pkg: {pkg} | Card: {c_num} | Exp: {c_exp}"
-        elif ticket_type == "SMS Drafting": st.info("📝 Soạn SMS"); process = st.text_area("Diễn biến"); draft = st.text_area("Nội dung chốt"); note_content = f"DIỄN BIẾN: {process}\nCHỐT: {draft}"; status_opts = ["Support", "Done"]
-        elif ticket_type == "Request (16 Digits)": mid = st.text_input("MID"); amt = st.text_input("Amount"); note_content = f"MID: {mid} | Amt: {amt}"; status_opts = ["Request", "Forwarded", "Support", "Done"]
-        st.markdown("---"); status = st.selectbox("📌 Trạng thái", status_opts)
-        
-        if st.form_submit_button("💾 LƯU & ĐỒNG BỘ", type="primary", use_container_width=True):
-            if phone:
-                end_dt = get_company_time(); end_time_str = format_excel_time(end_dt)
-                start_dt = st.session_state.ticket_start_time if st.session_state.ticket_start_time else end_dt; start_time_str = format_excel_time(start_dt); dt_str = start_dt.strftime('%m/%d/%Y')
-                insert_ticket(dt_str, salon, phone, note_content, note_content, status, cid, sel_agent, start_time_str, caller, ticket_type, iso_val, train_note, demo_note, card_info)
-                ticket_data = {'Date_Obj': start_dt, 'Date_Str': dt_str, 'Salon_Name': salon, 'Agent_Name': sel_agent, 'Support_Time': start_time_str, 'End_Time': end_time_str, 'Phone': phone, 'CID': cid, 'Note': note_content, 'Status': status, 'Caller_Info': caller, 'Ticket_Type': ticket_type, 'Training_Note': train_note, 'Card_16_Digits': card_info}
-                with st.spinner("⏳ Đang điền vào form Google Sheet..."): success, msg = save_to_google_sheet(ticket_data)
-                if success: 
-                    st.success(f"{msg}\n✅ Đã lưu SQLite & GSheet!"); st.toast("Đã lưu xong!", icon="✅"); 
-                    st.session_state.ticket_start_time = None; st.session_state.auto_fill_salon = ""; st.session_state.auto_fill_cid = "" 
-                    time.sleep(1); st.rerun()
-                else: st.warning(f"✅ Đã lưu SQLite nhưng ❌ Lỗi GSheet: {msg}")
-            else: st.warning("⚠️ Vui lòng nhập ít nhất Số điện thoại.")
+    if st.button("💾 LƯU & ĐỒNG BỘ", type="primary", use_container_width=True):
+        if phone: 
+            end_dt = get_company_time(); end_time_str = format_excel_time(end_dt)
+            start_dt = st.session_state.ticket_start_time if st.session_state.ticket_start_time else end_dt
+            start_time_str = format_excel_time(start_dt); dt_str = start_dt.strftime('%m/%d/%Y')
+            data_pack = {'Date_Obj': start_dt, 'Date_Str': dt_str, 'Salon_Name': salon, 'Agent_Name': sel_agent, 'Support_Time': start_time_str, 'End_Time': end_time_str, 'Phone': phone, 'CID': cid, 'Note': note_content, 'Status': status, 'Caller_Info': caller, 'Ticket_Type': ticket_type, 'Training_Note': train_note, 'Card_16_Digits': card_info}
+            confirm_save_dialog(data_pack)
+        else: st.warning("⚠️ Vui lòng nhập ít nhất Số điện thoại.")
 
 elif menu == "🗂️ Tra cứu Master Data":
     st.title("🗂️ Tra cứu Master Data (CID Salon)")
@@ -526,103 +549,85 @@ elif menu == "🗂️ Tra cứu Master Data":
     if "Error" in master_data: st.error(f"❌ Lỗi: {master_data['Error']}"); st.info("💡 Check quyền Share file 'CID Salon'.")
     else:
         tab_cid, tab_conf, tab_note, tab_term = st.tabs(["🔎 Tra cứu CID/Tiệm", "🚨 Special (Confirm)", "📝 ISO & General Note", "🔧 Terminal Fix"])
-        
         with tab_cid:
-            st.subheader("🔎 Tìm kiếm Thông tin Tiệm (Database Tổng)")
-            st.caption("💡 Hệ thống sẽ ưu tiên tìm trong file Master Data. Nếu không có, sẽ tự động mở rộng tìm kiếm.")
-            
+            st.subheader("🔎 Tìm kiếm Thông tin Tiệm")
             df_cid = master_data.get('CID', pd.DataFrame())
-            search_term = st.text_input("Nhập CID hoặc Tên Tiệm để tra cứu:", placeholder="VD: 07562 hoặc Elite Nails")
+            col_s1, col_s2 = st.columns([3, 1])
+            search_term = col_s1.text_input("Nhập CID hoặc Tên Tiệm:", placeholder="VD: 07562")
+            
+            # --- CHECKBOX BOT ONLINE (AUTO SELECTED) ---
+            enable_bot = st.checkbox("Bot Online", value=True)
             
             if st.button("🚀 Tìm kiếm", type="primary"):
                 if search_term:
-                    # 1. Tìm trong Master Data trước
                     found_local = False
+                    st.markdown("##### 📂 1. Kết quả trong Master Data (Local)")
                     if not df_cid.empty:
                         mask = df_cid.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
                         res = df_cid[mask]
-                        if not res.empty:
-                            st.success(f"✅ Đã tìm thấy {len(res)} kết quả trong Master Data:")
-                            st.dataframe(res, use_container_width=True)
-                            found_local = True
+                        if not res.empty: st.dataframe(res, use_container_width=True); found_local = True
+                        else: st.warning("⚠️ Không tìm thấy trong file Excel.")
                     
-                    # 2. Nếu không thấy -> Kích hoạt tìm kiếm mở rộng (Bot)
-                    if not found_local:
-                        st.info("⚠️ Không thấy trong Master Data. Đang tra cứu hệ thống mở rộng...")
-                        
-                        # Hiển thị spinner "ảo" để người dùng không biết là đang chạy Bot
-                        with st.spinner("🔄 Đang kết nối dữ liệu hệ thống (Vui lòng đợi 10-15s)..."):
-                            result_df = run_search_engine(search_term)
-                            
-                            if isinstance(result_df, pd.DataFrame) and not result_df.empty:
-                                st.success(f"✅ Đã tìm thấy dữ liệu bổ sung:")
-                                st.dataframe(result_df, use_container_width=True)
-                            elif result_df == "CLOUD_MODE":
-                                st.warning("⚠️ Chế độ Tra cứu Mở rộng chỉ khả dụng trên mạng nội bộ (Localhost).")
-                            else:
-                                st.warning("❌ Không tìm thấy thông tin nào trên toàn bộ hệ thống.")
-                else:
-                    st.warning("Vui lòng nhập từ khóa.")
-            
-            if not search_term and not df_cid.empty:
-                with st.expander("Xem toàn bộ danh sách Master Data (Cũ)", expanded=False):
-                    st.dataframe(df_cid, height=400, use_container_width=True)
-        
+                    if enable_bot:
+                        st.markdown("---")
+                        st.markdown("##### 🌐 2. Kết quả mở rộng từ hệ thống (Online)")
+                        if is_cloud_mode: st.warning("⚠️ Bot chỉ chạy trên Localhost.")
+                        else:
+                            with st.spinner(f"🤖 Bot đang tra cứu ngầm (Headless Mode)..."):
+                                result_df = run_search_engine(search_term)
+                                
+                                if isinstance(result_df, pd.DataFrame) and not result_df.empty: 
+                                    st.success(f"✅ Bot tìm thấy kết quả:"); 
+                                    st.dataframe(result_df, use_container_width=True)
+                                    
+                                    if st.button("💾 Lưu kết quả vào Database"):
+                                        success, msg = save_to_master_db_gsheet(result_df)
+                                        if success:
+                                            st.toast(f"✅ {msg}", icon="💾")
+                                            st.cache_data.clear()
+                                            time.sleep(1)
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Lỗi: {msg}")
+                                else: st.info("ℹ️ Không tìm thấy trên Web.")
+                else: st.warning("Vui lòng nhập từ khóa.")
         with tab_conf:
-            st.subheader("🚨 Danh sách Tiệm cần Lưu ý Đặc biệt (CONFIRMATION)")
-            df_conf = master_data.get('CONFIRMATION', pd.DataFrame())
-            
-            search_conf = st.text_input("🔎 Tìm kiếm Note Đặc biệt (Nhập CID/Tên/Note):")
-            if not df_conf.empty:
-                if search_conf:
-                    mask_conf = df_conf.astype(str).apply(lambda x: x.str.contains(search_conf, case=False, na=False)).any(axis=1)
-                    st.dataframe(df_conf[mask_conf], use_container_width=True)
-                else: st.dataframe(df_conf, use_container_width=True)
-            
-            st.markdown("---")
-            st.markdown("### 📝 Cập nhật Note cho Tiệm")
-            with st.form("update_note_form"):
-                target_cid = st.text_input("Nhập CID cần Note:")
-                new_note_content = st.text_area("Nội dung Note mới:")
-                if st.form_submit_button("Lưu Note lên Sheet"):
-                    if target_cid and new_note_content:
-                        with st.spinner("Đang ghi vào sheet CONFIRMATION..."):
-                            success, msg = update_confirmation_note(target_cid, new_note_content)
-                            if success: st.success(msg); st.cache_data.clear()
-                            else: st.error(msg)
-                    else: st.warning("Vui lòng nhập đủ CID và Nội dung.")
-
-        with tab_note: 
-            st.subheader("📝 Kiến thức chung & ISO (NOTE)")
+             st.dataframe(master_data.get('CONFIRMATION', pd.DataFrame()), use_container_width=True)
+             st.markdown("---"); 
+             with st.form("upd_note"):
+                 t_cid = st.text_input("CID"); t_note = st.text_area("Note mới")
+                 if st.form_submit_button("Lưu Note"):
+                     res, msg = update_confirmation_note(t_cid, t_note); st.success(msg) if res else st.error(msg)
+        # --- FIX LỖI SYNTAX ---
+        with tab_note:
             df_note = master_data.get('NOTE', pd.DataFrame())
             if not df_note.empty:
                 cols = st.columns(2)
                 for index, row in df_note.iterrows():
-                    title = str(row[0]).strip() if len(row) > 0 else ""
-                    content = str(row[1]).strip() if len(row) > 1 else ""
+                    title = str(row[0]).strip() if len(row) > 0 else ""; content = str(row[1]).strip() if len(row) > 1 else ""
                     if title and content:
-                        with cols[index % 2]:
-                            st.markdown(f"""<div class="info-card"><div class="info-title">{title}</div><div class="info-content">{content}</div></div>""", unsafe_allow_html=True)
-            else: st.info("Chưa có dữ liệu Note.")
-        
-        with tab_term: 
+                        with cols[index % 2]: 
+                            html_card = f"""
+                            <div class="info-card">
+                                <div class="info-title">{title}</div>
+                                <div class="info-content">{content}</div>
+                            </div>
+                            """
+                            st.markdown(html_card, unsafe_allow_html=True)
+            else: st.info("Chưa có dữ liệu.")
+        with tab_term:
             st.subheader("🔧 Terminal Integrate & Update")
             df_term = master_data.get('TERMINAL', pd.DataFrame())
             if not df_term.empty:
-                search_term = st.text_input("🔎 Tìm kiếm lỗi Terminal:", placeholder="Nhập mã lỗi hoặc tên máy...")
+                search_term = st.text_input("🔎 Tìm kiếm lỗi Terminal:", placeholder="Nhập mã lỗi...")
                 for index, row in df_term.iterrows():
-                    if index == 0 and "Terminal" in str(row[0]): continue
-                    term_name = str(row[0]).strip() if len(row) > 0 else ""
-                    error_name = str(row[1]).strip() if len(row) > 1 else ""
-                    full_title = f"🔌 {term_name} - {error_name}"
-                    fix_integrate = str(row[2]).strip() if len(row) > 2 else ""
-                    fix_update = str(row[3]).strip() if len(row) > 3 else ""
-                    content_text = f"{fix_integrate} {fix_update}"
-                    if search_term and search_term.lower() not in full_title.lower() and search_term.lower() not in content_text.lower(): continue
-                    if term_name or error_name:
-                        with st.expander(full_title):
-                            if fix_integrate: st.markdown(f"**🛠️ Integrate:**\n{fix_integrate}")
-                            if fix_update: st.markdown(f"**📲 Update:**\n{fix_update}")
+                    if index == 0: continue
+                    term_name = str(row[0]); error_name = str(row[1]); full_title = f"🔌 {term_name} - {error_name}"
+                    fix_integrate = str(row[2]); fix_update = str(row[3])
+                    if search_term and search_term.lower() not in full_title.lower(): continue
+                    with st.expander(full_title):
+                        if fix_integrate: st.markdown(f"**🛠️ Integrate:**\n{fix_integrate}")
+                        if fix_update: st.markdown(f"**📲 Update:**\n{fix_update}")
 
 elif menu == "🔍 Search & History":
     st.title("🔍 Tra cứu & Lịch sử"); term = st.text_input("🔎 Nhập từ khóa (Tên tiệm, SĐT, CID):"); filter_type = st.radio("Lọc:", ["Tất cả", "Training", "Request (16 Digits)", "SMS"], horizontal=True)
