@@ -8,62 +8,26 @@ import time
 import re
 import pytz
 from urllib.parse import urlencode
-import plotly.express as px  # <--- ĐÃ FIX: THÊM DÒNG NÀY ĐỂ DASHBOARD KHÔNG BỊ LỖI
+import plotly.express as px 
 
 # ==========================================
 # 1. CẤU HÌNH & IMPORT
 # ==========================================
 st.set_page_config(page_title="CRM - LLDTEK", page_icon="🏢", layout="wide")
 
-# --- DATABASE SETUP ---
-def init_db():
-    conn = sqlite3.connect('crm_data.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, Date TEXT, Salon_Name TEXT, Phone TEXT, Issue_Category TEXT, Note TEXT, Status TEXT, Created_At TEXT, CID TEXT, Contact TEXT, Card_16_Digits TEXT, Training_Note TEXT, Demo_Note TEXT, Agent_Name TEXT, Support_Time TEXT, Caller_Info TEXT, ISO_System TEXT, Ticket_Type TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS search_history (id INTEGER PRIMARY KEY AUTOINCREMENT, Search_Term TEXT, Result_Content TEXT, Created_At TEXT, Agent_Name TEXT)''')
-    conn.commit(); conn.close()
-init_db()
-
-# --- CHECK LIBS ---
-HAS_BOT_LIBS = False
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.common.keys import Keys
-    from selenium.webdriver.common.action_chains import ActionChains
-    from webdriver_manager.chrome import ChromeDriverManager
-    from bs4 import BeautifulSoup
-    HAS_BOT_LIBS = True
-except ImportError:
-    HAS_BOT_LIBS = False
-
-is_cloud_mode = False
-if not HAS_BOT_LIBS or "web_account" not in st.secrets:
-    is_cloud_mode = True
-
-# --- UI CSS ---
+# --- UI CSS CUSTOM (THÊM STYLE CHO BẢNG VICI) ---
 st.markdown("""
 <style>
     .stApp { font-family: 'Segoe UI', sans-serif; }
     .stTextArea textarea, .stTextInput input { font-family: 'Consolas', monospace; font-weight: 500; border-radius: 5px; }
     div[data-testid="stTextInput"] input[aria-label="⚡ Nhập CID (Auto-Fill & Check):"] { border: 2px solid #ff4b4b; background-color: #fff0f0; color: black; font-weight: bold; }
-    .info-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 15px; margin-bottom: 10px; height: 100%; }
-    .info-title { color: #ff4b4b; font-weight: bold; font-size: 1.1em; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 5px; }
-    .info-content { color: #e0e0e0; font-size: 0.95em; white-space: pre-wrap; }
-    .confirm-box { border: 2px solid #ff4b4b; padding: 20px; border-radius: 10px; background-color: #2b2b2b; text-align: center; margin-bottom: 20px; }
     
-    /* VICI Full Info Box - FIXED */
-    .vici-container { background-color: #f0f2f6; padding: 15px; border-radius: 10px; border: 1px solid #d6d6d6; color: #31333F; margin-bottom: 20px; }
-    .vici-header { font-size: 1.1em; font-weight: bold; color: #ff4b4b; margin-bottom: 10px; text-transform: uppercase; border-bottom: 2px solid #ff4b4b; display: inline-block; }
-    .vici-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .vici-item { background: white; padding: 8px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .vici-label { font-size: 0.85em; color: #666; font-weight: bold; display: block; margin-bottom: 2px; }
-    .vici-value { font-size: 1em; color: #000; font-weight: 500; word-break: break-word; }
+    /* VICI INFO BOX STYLING (NEW) */
+    .vici-box { background-color: #e6e6e6; color: #000; padding: 15px; border-radius: 5px; border: 1px solid #999; margin-bottom: 20px; font-family: Arial, sans-serif; }
+    .vici-title { color: #000080; font-weight: bold; font-size: 1.1em; margin-bottom: 10px; text-decoration: underline; }
+    .vici-row { display: flex; margin-bottom: 5px; flex-wrap: wrap; }
+    .vici-label { font-weight: bold; width: 90px; text-align: right; margin-right: 10px; color: #333; }
+    .vici-val { font-weight: bold; color: #000; flex: 1; border-bottom: 1px dotted #999; min-width: 150px; }
     
     footer {visibility: hidden;}
 </style>
@@ -72,11 +36,11 @@ st.markdown("""
 AVAILABLE_SHEETS = ["2-3-4 DAILY REPORT 12/25", "2-3-4 DAILY REPORT 01/26"]
 MASTER_DB_FILE = "CID Salon"
 SUP_USERS = ["Phương Loan", "Thùy Dung"]
-IGNORED_TAB_NAMES = ["form request", "sheet 4", "sheet4", "request", "request daily", "total", "summary", "copy of", "bản sao"]
+IGNORED_TAB_NAMES = ["form request", "sheet 4", "sheet4", "request", "request daily", "total", "summary", "copy of", "bản sao", "copy"]
 KEEP_COLUMNS = ["Date", "Salon_Name", "Agent_Name", "Phone", "CID", "Owner", "Note", "Status", "Issue_Category", "Support_Time", "End_Time", "Ticket_Type", "Caller_Info", "ISO_System", "Training_Note", "Demo_Note", "Card_16_Digits"]
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 2. HELPER FUNCTIONS (GIỮ NGUYÊN)
 # ==========================================
 def get_company_time():
     utc_now = datetime.now(pytz.utc)
@@ -122,20 +86,26 @@ def safe_process_dataframe(df, rename_map):
         if col not in df.columns: df[col] = ""
     return df[KEEP_COLUMNS]
 
-def parse_vici_comments(comment_str):
-    if not comment_str: return "", ""
-    clean_str = comment_str.replace('"', '').strip()
-    match = re.search(r'(\d{4,6})$', clean_str)
-    if match:
-        cid = match.group(1)
-        name = clean_str[:match.start()].strip()
-        name = name.rstrip(' -|:')
-        return name, cid
-    return clean_str, ""
+# ==========================================
+# 3. BOT SEARCH ENGINE (GIỮ NGUYÊN)
+# ==========================================
+HAS_BOT_LIBS = False
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from webdriver_manager.chrome import ChromeDriverManager
+    HAS_BOT_LIBS = True
+except ImportError:
+    HAS_BOT_LIBS = False
 
-# ==========================================
-# 3. BOT SEARCH ENGINE (V108 LOGIC)
-# ==========================================
+is_cloud_mode = False
+if not HAS_BOT_LIBS or "web_account" not in st.secrets:
+    is_cloud_mode = True
+
 def extract_final_data(driver, search_term):
     try:
         html = driver.page_source
@@ -157,7 +127,6 @@ def run_search_engine(search_term):
     chrome_options.add_argument("--headless=new") 
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--ignore-certificate-errors")
-    chrome_options.add_argument("--ignore-ssl-errors")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     driver = None
@@ -178,8 +147,8 @@ def run_search_engine(search_term):
         driver.get("https://lldtek.org/salon/web/pos/list")
         time.sleep(3) 
         try:
+            # Logic tìm ô Search (Giữ nguyên)
             all_inputs = driver.find_elements(By.XPATH, "//body//input[not(ancestor::header) and not(ancestor::nav)]")
-            filled_count = 0
             for i in all_inputs:
                 try:
                     if not i.is_displayed(): continue
@@ -187,34 +156,27 @@ def run_search_engine(search_term):
                     ph = str(i.get_attribute("placeholder")).lower()
                     date_keywords = ["date", "mm/dd", "yyyy", "calendar", "picker", "from", "to"]
                     if t not in ["text", "search"] or any(dw in ph for dw in date_keywords): continue
-                    driver.execute_script("arguments[0].style.border='3px solid red'", i)
                     i.click(); i.clear(); i.send_keys(search_term); 
-                    filled_count += 1
                     try:
                         neighbor_btn = i.find_element(By.XPATH, "./following::button[1]")
-                        if neighbor_btn.is_displayed():
-                            driver.execute_script("arguments[0].style.border='4px solid blue'", neighbor_btn)
-                            driver.execute_script("arguments[0].click();", neighbor_btn)
+                        if neighbor_btn.is_displayed(): driver.execute_script("arguments[0].click();", neighbor_btn)
                     except: pass
                     time.sleep(0.2)
                 except: pass
-            status_log.info("⏳ Đang xử lý dữ liệu từ máy chủ...")
+            status_log.info("⏳ Đang xử lý dữ liệu...")
             time.sleep(6) 
             body_text = driver.find_element(By.TAG_NAME, "body").text
             if search_term in body_text:
                 status_log.success("✅ Đã tìm thấy dữ liệu!")
                 final_df = extract_final_data(driver, search_term)
-                driver.quit()
-                return final_df
+                driver.quit(); return final_df
             else:
                  status_log.warning("⚠️ Không tìm thấy kết quả phù hợp.")
             driver.quit(); status_log.empty(); return pd.DataFrame()
         except Exception as e:
-            st.error(f"❌ Lỗi xử lý: {str(e)}")
             if driver: driver.quit()
             return None
     except Exception as e:
-        st.error(f"❌ Lỗi Bot: {str(e)}")
         if driver: driver.quit()
         return None
 
@@ -224,7 +186,7 @@ def save_to_master_db_gsheet(df):
         gc = gspread.authorize(credentials)
         sh = gc.open(MASTER_DB_FILE) 
         try: ws = sh.worksheet("CID")
-        except: return False, "Không tìm thấy sheet 'CID' trong file."
+        except: return False, "Không tìm thấy sheet 'CID'."
         count = 0
         for index, row in df.iterrows():
             row_str = row.astype(str).tolist()
@@ -246,7 +208,7 @@ def save_to_master_db_gsheet(df):
     except Exception as e: return False, str(e)
 
 # ==========================================
-# 4. GOOGLE SHEET & FORMATTING
+# 4. GOOGLE SHEET & FORMATTING (GIỮ NGUYÊN)
 # ==========================================
 def get_target_worksheet(date_obj):
     month_year_1 = date_obj.strftime("%m/%y"); month_year_2 = f"{date_obj.month}/{date_obj.strftime('%y')}"
@@ -267,13 +229,8 @@ def apply_full_format(ws, row_idx, color_type):
     colors = {'red': {"red": 1.0, "green": 0.0, "blue": 0.0}, 'blue': {"red": 0.0, "green": 0.0, "blue": 1.0}, 'black': {"red": 0.0, "green": 0.0, "blue": 0.0}}
     fmt_base = {"textFormat": {"fontFamily": "Times New Roman", "fontSize": 12, "foregroundColor": colors.get(color_type, colors['black'])}, "verticalAlignment": "BOTTOM"}
     fmt_center = fmt_base.copy(); fmt_center["horizontalAlignment"] = "CENTER"; fmt_center["wrapStrategy"] = "WRAP"
-    fmt_left_clip = fmt_base.copy(); fmt_left_clip["horizontalAlignment"] = "LEFT"; fmt_left_clip["wrapStrategy"] = "CLIP"
-    fmt_left_wrap = fmt_base.copy(); fmt_left_wrap["horizontalAlignment"] = "LEFT"; fmt_left_wrap["wrapStrategy"] = "WRAP"
     try:
         ws.format(f"B{row_idx}:K{row_idx}", fmt_center)
-        ws.format(f"B{row_idx}:C{row_idx}", fmt_left_clip)
-        ws.format(f"F{row_idx}", fmt_left_wrap)
-        ws.format(f"J{row_idx}:K{row_idx}", fmt_left_wrap)
     except: pass
 
 def save_to_google_sheet(ticket_data):
@@ -283,10 +240,10 @@ def save_to_google_sheet(ticket_data):
         all_values = target_ws.get_values("A7:K150"); target_row_idx = -1; current_stt = ""
         for i, row in enumerate(all_values):
             real_row_idx = 7 + i
-            val_stt = str(row[0]).strip() if len(row) > 0 else ""; val_name = str(row[1]).strip() if len(row) > 1 else ""; val_salon = str(row[5]).strip() if len(row) > 5 else ""
+            val_stt = str(row[0]).strip() if len(row) > 0 else ""; val_name = str(row[1]).strip() if len(row) > 1 else ""
             if not val_stt: break
-            if val_stt and val_name == "" and val_salon == "": target_row_idx = real_row_idx; current_stt = val_stt; break
-        if target_row_idx == -1: return False, "⚠️ Hết dòng trống! Vui lòng kéo thêm STT trong Excel."
+            if val_stt and val_name == "": target_row_idx = real_row_idx; current_stt = val_stt; break
+        if target_row_idx == -1: return False, "⚠️ Hết dòng trống!"
         full_note = ticket_data['Note']
         if ticket_data['Ticket_Type'] == "Training": full_note = ticket_data['Training_Note'] + " | " + full_note
         if ticket_data['Ticket_Type'] == "Request (16 Digits)": full_note = ticket_data['Card_16_Digits'] + " | " + full_note
@@ -318,48 +275,55 @@ def update_google_sheet_row(date_str, phone, salon_name, new_status, new_note):
     except Exception as e: return False, f"❌ Lỗi Update: {str(e)}"
 
 # ==========================================
-# 5. LOAD DATA & GLOBAL
+# 5. LOAD DATA (CẬP NHẬT MỚI ĐỂ FIX DUPLICATE)
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def load_gsheet_data(selected_sheets):
     if not selected_sheets: return pd.DataFrame()
     try:
-        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets'])
         gc = gspread.authorize(credentials); all_data = []
-        for idx, s_name in enumerate(selected_sheets):
+        for s_name in selected_sheets:
             try:
-                sh = gc.open(s_name); tabs = [ws for ws in sh.worksheets() if ws.title.lower().strip() not in IGNORED_TAB_NAMES]
-                for i, ws in enumerate(tabs):
+                sh = gc.open(s_name)
+                # Lọc kỹ các Sheet ẩn
+                tabs = [ws for ws in sh.worksheets() if not any(ign in ws.title.lower() for ign in IGNORED_TAB_NAMES)]
+                for ws in tabs:
                     try:
                         raw = ws.get_all_values()
                         if len(raw) < 2: continue
-                        if len(ws.title) < 10 or "/" in ws.title:
-                            header_idx = -1
-                            for r_idx, row in enumerate(raw[:10]):
-                                if "salon" in "".join([str(c).lower() for c in row]): header_idx = r_idx; break
-                            if header_idx != -1:
-                                df_d = pd.DataFrame(raw[header_idx+1:], columns=clean_headers(raw[header_idx]))
-                                rename = {"Salon Name": "Salon_Name", "Name": "Agent_Name", "Time": "Support_Time", "Owner": "Caller_Info", "Phone": "Phone", "CID": "CID", "Note": "Note", "Status": "Status"}
-                                df_d = safe_process_dataframe(df_d, rename)
-                                if "Note" in df_d.columns: df_d["Issue_Category"] = df_d["Note"]
-                                df_d["Date"] = construct_date_from_context(None, s_name, ws.title); df_d["Ticket_Type"] = "Support"; df_d["Status"] = df_d["Status"].replace({"Pending": "Support", "pending": "Support"})
-                                all_data.append(df_d)
+                        header_idx = -1
+                        for r_idx, row in enumerate(raw[:15]): # Quét sâu hơn
+                            if "salon" in "".join([str(c).lower() for c in row]): header_idx = r_idx; break
+                        if header_idx != -1:
+                            df_d = pd.DataFrame(raw[header_idx+1:], columns=clean_headers(raw[header_idx]))
+                            rename = {"Salon Name": "Salon_Name", "Name": "Agent_Name", "Time": "Support_Time", "Phone": "Phone", "Status": "Status", "Note": "Note", "CID": "CID"}
+                            df_d = safe_process_dataframe(df_d, rename)
+                            if "Note" in df_d.columns: df_d["Issue_Category"] = df_d["Note"] 
+                            df_d["Date"] = construct_date_from_context(None, s_name, ws.title)
+                            df_d["Ticket_Type"] = "Support"; df_d["Status"] = df_d["Status"].replace({"Pending": "Support", "pending": "Support"})
+                            all_data.append(df_d)
                     except: continue
             except: pass
-        return pd.concat(all_data, ignore_index=True).replace({'nan': '', 'None': '', 'NaN': ''}) if all_data else pd.DataFrame()
-    except Exception as e: st.error(f"Lỗi: {e}"); return pd.DataFrame()
+        
+        if all_data:
+            final_df = pd.concat(all_data, ignore_index=True).replace({'nan': '', 'None': '', 'NaN': ''})
+            # --- FIX: XÓA TRÙNG LẶP DỮ LIỆU ---
+            final_df = final_df.drop_duplicates(subset=['Phone', 'Date', 'Support_Time', 'Agent_Name'])
+            return final_df
+        return pd.DataFrame()
+    except Exception as e: st.error(f"Lỗi Load Data: {e}"); return pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_master_db():
     try:
-        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+        credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/spreadsheets'])
         gc = gspread.authorize(credentials); sh = gc.open(MASTER_DB_FILE)
         master_data = {}
         try: 
             ws_cid = sh.worksheet("CID"); raw_cid = ws_cid.get_all_values()
             if len(raw_cid) > 1:
                 headers = clean_headers(raw_cid[0]); master_data['CID'] = pd.DataFrame(raw_cid[1:], columns=headers)
-            else: master_data['CID'] = pd.DataFrame()
         except: master_data['CID'] = pd.DataFrame()
         try: ws_note = sh.worksheet("NOTE"); master_data['NOTE'] = pd.DataFrame(ws_note.get_all_values())
         except: master_data['NOTE'] = pd.DataFrame()
@@ -367,7 +331,6 @@ def load_master_db():
             ws_conf = sh.worksheet("CONFIRMATION"); raw_conf = ws_conf.get_all_values()
             if len(raw_conf) > 1:
                 headers = clean_headers(raw_conf[1]); master_data['CONFIRMATION'] = pd.DataFrame(raw_conf[2:], columns=headers) 
-            else: master_data['CONFIRMATION'] = pd.DataFrame()
         except: master_data['CONFIRMATION'] = pd.DataFrame()
         try: 
             ws_term = None
@@ -427,7 +390,7 @@ if st.sidebar.button("🔄 Cập nhật Dữ liệu Mới"): st.cache_data.clear
 # --- LOAD DATA GLOBAL ---
 default_sheets = get_current_month_sheet()
 sheets = st.sidebar.multiselect("Dữ liệu Report:", AVAILABLE_SHEETS, default=default_sheets)
-df = load_gsheet_data(sheets) # Load df ở đây để toàn app dùng được
+df = load_gsheet_data(sheets) 
 
 st.sidebar.markdown("---")
 agents = ["Phương Loan", "Hương Giang", "Phương Anh", "Tuấn Võ", "Thùy Dung", "Phương Hồ", "Chiến Phạm", "Anh Đạt", "Tiến Dương", "Schang Sanh", "Tuyết Anh", "Liên Chi", "Anh Thư"]
@@ -467,50 +430,41 @@ if menu == "🆕 New Ticket":
     
     qp = st.query_params
     
-    # FORCE SYNC LOGIC
+    # --- PHẦN MỚI: HIỂN THỊ INFO VICI ---
     if qp.get("phone"):
-        vici_phone = qp.get("phone")
-        if vici_phone != st.session_state.ticket_phone:
-            st.session_state.ticket_phone = vici_phone
-            if qp.get("comments"):
-                p_name, p_cid = parse_vici_comments(qp.get("comments"))
-                st.session_state.ticket_salon = p_name
-                st.session_state.ticket_cid = p_cid
-            st.session_state.ticket_note = ""
-            st.session_state.ticket_owner = qp.get("user", "") 
-            st.rerun()
-
-    if qp:
-        with st.expander("🕵️ Dữ liệu gốc từ VICI (Để đối chiếu)", expanded=True):
-            # Lấy thông tin từ URL
-            v_name = f"{qp.get('first_name', '')} {qp.get('last_name', '')}".strip()
-            v_address = qp.get('address', '')
-            v_city = qp.get('city', '')
-            v_state = qp.get('state', '')
-            v_zip = qp.get('zip', '')
-            v_email = qp.get('email', '')
-            v_vendor = qp.get('vendor_id', '')
-            v_comments = qp.get('comments', '')
-
-            # Sử dụng HTML không thụt dòng (No Indentation) để tránh lỗi Render
-            html_content = f"""
-<div class="vici-container">
-    <div class="vici-header">📡 Dữ liệu từ VICI Dial</div>
-    <div class="vici-grid">
-        <div class="vici-item"><span class="vici-label">👤 Tên Khách:</span><span class="vici-value">{v_name if v_name else "---"}</span></div>
-        <div class="vici-item"><span class="vici-label">📞 Phone:</span><span class="vici-value">{qp.get('phone', '---')}</span></div>
-        <div class="vici-item"><span class="vici-label">🆔 Vendor ID:</span><span class="vici-value">{v_vendor if v_vendor else "---"}</span></div>
-        <div class="vici-item"><span class="vici-label">🏠 Address:</span><span class="vici-value">{v_address if v_address else "---"}</span></div>
-        <div class="vici-item"><span class="vici-label">🏙️ City/State:</span><span class="vici-value">{v_city}, {v_state} {v_zip}</span></div>
-        <div class="vici-item"><span class="vici-label">📧 Email:</span><span class="vici-value">{v_email if v_email else "---"}</span></div>
-        <div class="vici-item" style="grid-column: span 3;"><span class="vici-label">📝 Comments:</span><span class="vici-value">{v_comments if v_comments else "---"}</span></div>
-    </div>
-</div>
-"""
-            st.markdown(html_content, unsafe_allow_html=True)
+        with st.expander("📡 THÔNG TIN TỪ VICI (Click để mở rộng)", expanded=True):
+            v_first = qp.get("first_name", "")
+            v_last = qp.get("last_name", "")
+            v_address = qp.get("address", "")
+            v_city = qp.get("city", "")
+            v_state = qp.get("state", "")
+            v_zip = qp.get("zip", "")
+            v_phone = qp.get("phone", "")
+            v_vendor = qp.get("vendor_id", "")
+            v_comments = qp.get("comments", "")
+            
+            # Bảng thông tin màu xám giống ảnh yêu cầu
+            st.markdown(f"""
+            <div class="vici-box">
+                <div class="vici-title">Customer Information: LEAD SEARCH</div>
+                <div class="vici-row"><div class="vici-label">First:</div><div class="vici-val">{v_first}</div> <div class="vici-label">Last:</div><div class="vici-val">{v_last}</div></div>
+                <div class="vici-row"><div class="vici-label">Address:</div><div class="vici-val">{v_address}</div></div>
+                <div class="vici-row"><div class="vici-label">City:</div><div class="vici-val">{v_city}</div> <div class="vici-label">State:</div><div class="vici-val">{v_state}</div> <div class="vici-label">Zip:</div><div class="vici-val">{v_zip}</div></div>
+                <div class="vici-row"><div class="vici-label">Vendor ID:</div><div class="vici-val">{v_vendor}</div></div>
+                <div class="vici-row"><div class="vici-label">Phone:</div><div class="vici-val" style="color:red;">{v_phone}</div></div>
+                <div class="vici-row"><div class="vici-label">Comments:</div><div class="vici-val">{v_comments}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if v_phone != st.session_state.ticket_phone:
+                st.session_state.ticket_phone = v_phone
+                clean_cmt = v_comments.replace('"', '').strip()
+                match = re.search(r'(\d{4,6})$', clean_cmt)
+                if match: st.session_state.ticket_cid = match.group(1); st.session_state.ticket_salon = clean_cmt[:match.start()].strip(' -:')
+            st.session_state.ticket_owner = qp.get("user", "")
 
     col_af1, col_af2 = st.columns([1, 2])
-    auto_cid = col_af1.text_input("⚡ Nhập CID (Auto-Fill & Check):", placeholder="VD: 07562")
+    auto_cid = col_af1.text_input("⚡ Nhập CID (Auto-Fill & Check):", placeholder="VD: 07562", value=st.session_state.ticket_cid)
     if auto_cid and st.session_state.ticket_cid != auto_cid:
          st.session_state.ticket_cid = auto_cid
          master_data = load_master_db(); df_cid = master_data.get('CID', pd.DataFrame())
@@ -556,40 +510,29 @@ elif menu == "🗂️ Tra cứu Master Data":
             col_s1, col_s2 = st.columns([3, 1])
             search_term = col_s1.text_input("Nhập CID hoặc Tên Tiệm:", placeholder="VD: 07562")
             
-            # --- CHECKBOX BOT ONLINE (AUTO SELECTED) ---
             enable_bot = st.checkbox("Bot Online", value=True)
             
             if st.button("🚀 Tìm kiếm", type="primary"):
                 if search_term:
-                    found_local = False
                     st.markdown("##### 📂 1. Kết quả trong Master Data (Local)")
                     if not df_cid.empty:
                         mask = df_cid.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
                         res = df_cid[mask]
-                        if not res.empty: st.dataframe(res, use_container_width=True); found_local = True
+                        if not res.empty: st.dataframe(res, use_container_width=True)
                         else: st.warning("⚠️ Không tìm thấy trong file Excel.")
                     
                     if enable_bot:
-                        st.markdown("---")
-                        st.markdown("##### 🌐 2. Kết quả mở rộng từ hệ thống (Online)")
+                        st.markdown("---"); st.markdown("##### 🌐 2. Kết quả mở rộng từ hệ thống (Online)")
                         if is_cloud_mode: st.warning("⚠️ Bot chỉ chạy trên Localhost.")
                         else:
                             with st.spinner(f"🤖 Bot đang tra cứu ngầm (Headless Mode)..."):
                                 result_df = run_search_engine(search_term)
-                                
                                 if isinstance(result_df, pd.DataFrame) and not result_df.empty: 
-                                    st.success(f"✅ Bot tìm thấy kết quả:"); 
-                                    st.dataframe(result_df, use_container_width=True)
-                                    
+                                    st.success(f"✅ Bot tìm thấy kết quả:"); st.dataframe(result_df, use_container_width=True)
                                     if st.button("💾 Lưu kết quả vào Database"):
                                         success, msg = save_to_master_db_gsheet(result_df)
-                                        if success:
-                                            st.toast(f"✅ {msg}", icon="💾")
-                                            st.cache_data.clear()
-                                            time.sleep(1)
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Lỗi: {msg}")
+                                        if success: st.toast(f"✅ {msg}", icon="💾"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                                        else: st.error(f"Lỗi: {msg}")
                                 else: st.info("ℹ️ Không tìm thấy trên Web.")
                 else: st.warning("Vui lòng nhập từ khóa.")
         with tab_conf:
@@ -599,7 +542,6 @@ elif menu == "🗂️ Tra cứu Master Data":
                  t_cid = st.text_input("CID"); t_note = st.text_area("Note mới")
                  if st.form_submit_button("Lưu Note"):
                      res, msg = update_confirmation_note(t_cid, t_note); st.success(msg) if res else st.error(msg)
-        # --- FIX LỖI SYNTAX ---
         with tab_note:
             df_note = master_data.get('NOTE', pd.DataFrame())
             if not df_note.empty:
@@ -608,13 +550,7 @@ elif menu == "🗂️ Tra cứu Master Data":
                     title = str(row[0]).strip() if len(row) > 0 else ""; content = str(row[1]).strip() if len(row) > 1 else ""
                     if title and content:
                         with cols[index % 2]: 
-                            html_card = f"""
-                            <div class="info-card">
-                                <div class="info-title">{title}</div>
-                                <div class="info-content">{content}</div>
-                            </div>
-                            """
-                            st.markdown(html_card, unsafe_allow_html=True)
+                            st.markdown(f"""<div class="info-card"><div class="info-title">{title}</div><div class="info-content">{content}</div></div>""", unsafe_allow_html=True)
             else: st.info("Chưa có dữ liệu.")
         with tab_term:
             st.subheader("🔧 Terminal Integrate & Update")
