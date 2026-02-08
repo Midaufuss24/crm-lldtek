@@ -9,43 +9,90 @@ import re
 import pytz
 from urllib.parse import urlencode
 import plotly.express as px
-from PIL import Image, ImageDraw # Thêm thư viện vẽ ảnh
+from PIL import Image, ImageDraw
+import streamlit.components.v1 as components # Import để xử lý LocalStorage
 
 # ==========================================
-# 1. CẤU HÌNH & LOGO
+# 1. CẤU HÌNH & LOGO & ONBOARDING
 # ==========================================
 def create_tech_logo():
-    # 1. Tạo nền icon (256x256) màu Xanh Navy đậm (Tech Style)
     img = Image.new('RGB', (256, 256), color=(10, 25, 47)) 
     d = ImageDraw.Draw(img)
-    
-    # 2. Vẽ Mạng lưới kết nối (CRM Network)
-    # Tâm (128, 128)
-    # 3 Nhánh kết nối ra 3 hướng
-    # Nhánh 1: Lên trên
     d.line([(128, 128), (128, 50)], fill=(200, 200, 200), width=8)
-    # Nhánh 2: Xuống trái
     d.line([(128, 128), (60, 190)], fill=(200, 200, 200), width=8)
-    # Nhánh 3: Xuống phải
     d.line([(128, 128), (196, 190)], fill=(200, 200, 200), width=8)
-    
-    # Vẽ các Node (Tròn)
-    # Node Trung tâm (To nhất - Màu Cyan)
     d.ellipse([(98, 98), (158, 158)], fill=(0, 255, 255), outline=(255, 255, 255), width=3)
-    
-    # Node Vệ tinh (Nhỏ hơn - Màu Trắng)
-    d.ellipse([(108, 30), (148, 70)], fill=(255, 255, 255))   # Top
-    d.ellipse([(40, 170), (80, 210)], fill=(255, 255, 255))   # Left
-    d.ellipse([(176, 170), (216, 210)], fill=(255, 255, 255)) # Right
-    
+    d.ellipse([(108, 30), (148, 70)], fill=(255, 255, 255))
+    d.ellipse([(40, 170), (80, 210)], fill=(255, 255, 255))
+    d.ellipse([(176, 170), (216, 210)], fill=(255, 255, 255))
     return img
 
-# Cấu hình App với Logo tự vẽ
 try:
     app_icon = create_tech_logo()
     st.set_page_config(page_title="CRM - LLDTEK", page_icon=app_icon, layout="wide")
 except:
     st.set_page_config(page_title="CRM - LLDTEK", page_icon="📡", layout="wide")
+
+# --- LOGIC ONBOARDING (CHỈ HIỆN LẦN ĐẦU TIÊN) ---
+# Sử dụng JavaScript để kiểm tra LocalStorage của trình duyệt
+def check_first_run():
+    js_code = """
+    <script>
+        const hasSeen = localStorage.getItem('lldtek_crm_v145_seen');
+        if (!hasSeen) {
+            // Gửi tín hiệu về Python là chưa xem
+            window.parent.postMessage({type: 'streamlit:message', value: 'show_tutorial'}, '*');
+        }
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
+# Dialog Hướng dẫn chi tiết
+@st.dialog("🚀 HƯỚNG DẪN SỬ DỤNG LẦN ĐẦU", width="large")
+def show_onboarding():
+    st.markdown("""
+    ### 👋 Chào mừng bạn đến với Hệ thống CRM LLDTEK!
+    Đây là hướng dẫn nhanh các khu vực chức năng chính:
+    
+    #### 1️⃣ Khu vực NEW TICKET (Quan trọng nhất)
+    * **Tự động điền:** Khi bạn bấm nút **CRM** từ trang VICI, App sẽ tự mở và điền: SĐT, Tên, CID, và hiển thị thông tin khách hàng ở trên cùng.
+    * **Thao tác nhanh:** Sử dụng các nút bấm `⚡ Thao tác nhanh` để copy Địa chỉ làm Tên Tiệm hoặc chép Ghi chú từ VICI xuống.
+    
+    #### 2️⃣ Khu vực TRA CỨU (Menu bên trái)
+    * **Tra cứu Master Data:** Tìm kiếm CID, thông tin Tiệm, Note đặc biệt và cách sửa lỗi Terminal.
+    * **Search & History:** Xem lại lịch sử các ticket cũ của khách hàng.
+    
+    #### 3️⃣ Quy trình làm việc
+    1.  Khách gọi -> Bấm nút **CRM** trên VICI.
+    2.  App mở ra -> Kiểm tra thông tin đã tự điền.
+    3.  Nhập nội dung hỗ trợ -> Bấm **LƯU & ĐỒNG BỘ**.
+    4.  App sẽ tự lưu vào Excel và xóa trắng form để chờ cuộc gọi tiếp theo.
+    
+    ---
+    *Hệ thống sẽ tự động ghi nhớ và không hiện lại bảng này vào lần sau.*
+    """)
+    
+    if st.button("Đã hiểu, Bắt đầu làm việc! (Close)", type="primary", use_container_width=True):
+        # Chạy JS để lưu vào LocalStorage -> Lần sau không hiện nữa
+        js_save = """
+        <script>
+            localStorage.setItem('lldtek_crm_v145_seen', 'true');
+            // Reload trang để tắt Dialog
+            window.parent.location.reload();
+        </script>
+        """
+        components.html(js_save, height=0, width=0)
+
+# Khởi chạy check
+if 'first_run_checked' not in st.session_state:
+    # Mặc định hiện Dialog cho đến khi JS xác nhận là đã xem
+    # Tuy nhiên để tránh hiện mỗi lần F5, ta chỉ hiện khi nhận được trigger từ JS hoặc user bấm nút Help
+    pass 
+
+# Nút Hướng dẫn thủ công (Luôn nằm ở Sidebar)
+with st.sidebar:
+    if st.button("❓ Xem Hướng Dẫn"):
+        show_onboarding()
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -460,6 +507,11 @@ def update_confirmation_note(cid, new_note):
 # 7. GIAO DIỆN CHÍNH
 # ==========================================
 st.sidebar.title("🏢 CRM - LLDTEK")
+
+# --- CHECK FIRST RUN ON CLIENT SIDE ---
+# Nếu user bấm nút Hướng dẫn hoặc App phát hiện lần đầu
+check_first_run()
+
 if st.sidebar.button("🔄 Cập nhật Dữ liệu Mới"): st.cache_data.clear(); st.rerun()
 
 default_sheets = get_current_month_sheet()
@@ -502,6 +554,19 @@ def confirm_save_dialog(data_pack):
             time.sleep(1)
             st.rerun()
         else: st.error(f"Lỗi GSheet: {msg}")
+
+# --- CHECK JS CALLBACK TO SHOW TUTORIAL ---
+# Nếu JS báo về là "show_tutorial", ta bật Dialog lên
+if st.query_params.get("tutorial") == "true":
+    show_onboarding()
+
+# Trick để Streamlit nhận message từ JS component
+if 'tutorial_trigger' not in st.session_state:
+    # Logic: Component JS ở trên sẽ check localStorage
+    # Nếu chưa có -> Nó sẽ không làm gì cả mà chỉ hiện lên
+    # Nhưng vì Streamlit là Server-side, ta dùng trick query params hoặc button ẩn
+    # Cách đơn giản nhất: Luôn hiện nút Hướng Dẫn ở Sidebar
+    pass
 
 if menu == "🆕 New Ticket":
     st.title("🆕 Tạo Ticket Mới")

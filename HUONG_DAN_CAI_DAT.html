@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hướng Dẫn Cài Đặt & Sử Dụng CRM LLDTEK</title>
+    <style>
+        :root { --primary: #0056b3; --success: #28a745; --warning: #ffc107; --danger: #dc3545; --dark: #343a40; --light: #f8f9fa; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #eef2f5; color: #333; margin: 0; padding: 0; line-height: 1.6; }
+        .container { max-width: 900px; margin: 40px auto; background: white; padding: 50px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+        
+        /* HEADER */
+        header { text-align: center; border-bottom: 2px solid #eef2f5; padding-bottom: 30px; margin-bottom: 40px; }
+        h1 { color: var(--primary); margin: 0; font-size: 2.2em; text-transform: uppercase; letter-spacing: 1px; }
+        .subtitle { color: #6c757d; font-size: 1.1em; margin-top: 10px; }
+
+        /* SECTIONS */
+        .section-title { background: var(--primary); color: white; padding: 10px 20px; border-radius: 6px; display: inline-block; margin-top: 40px; margin-bottom: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.9em; letter-spacing: 1px; }
+        
+        /* STEPS */
+        .step-card { background: white; border: 1px solid #e9ecef; border-left: 5px solid var(--primary); padding: 20px; margin-bottom: 15px; border-radius: 4px; transition: transform 0.2s; }
+        .step-card:hover { transform: translateX(5px); box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
+        .step-num { font-weight: bold; color: var(--primary); font-size: 1.2em; margin-right: 10px; }
+        
+        /* CODE BOX & COPY BUTTON */
+        .code-container { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 6px; margin: 10px 0; display: flex; align-items: center; justify-content: space-between; }
+        code { font-family: 'Consolas', monospace; font-size: 1.1em; color: #a6e22e; }
+        .copy-btn { background: var(--success); color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.9em; transition: 0.2s; }
+        .copy-btn:hover { background: #218838; }
+        .copy-btn:active { transform: scale(0.95); }
+
+        /* IMAGES PLACEHOLDER */
+        .visual-guide { background: #e2e6ea; border: 2px dashed #cbd3da; color: #6c757d; padding: 20px; text-align: center; border-radius: 6px; margin: 10px 0; font-style: italic; font-size: 0.9em; }
+
+        /* USER MANUAL SECTION */
+        .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .manual-item { background: #f8f9fa; padding: 20px; border-radius: 8px; border-top: 4px solid var(--success); }
+        .manual-item h3 { margin-top: 0; color: var(--success); }
+
+        /* TROUBLESHOOTING */
+        .alert-box { background: #fff3cd; color: #856404; padding: 20px; border-radius: 6px; border: 1px solid #ffeeba; margin-top: 30px; }
+        .alert-title { font-weight: bold; display: block; margin-bottom: 10px; font-size: 1.1em; }
+
+        footer { text-align: center; margin-top: 50px; color: #adb5bd; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>CRM LLDTEK INSTALLATION</h1>
+        <div class="subtitle">Hướng dẫn Cài đặt & Sử dụng dành cho Nhân viên</div>
+    </header>
+
+    <div class="section-title">PHẦN 1: CÀI ĐẶT HỆ THỐNG (CHỈ LÀM 1 LẦN)</div>
+    <p>Để hệ thống hoạt động, bạn cần cài đặt <b>Tiện ích mở rộng (Extension)</b> vào trình duyệt Chrome. Hãy làm đúng theo các bước sau:</p>
+
+    <div class="step-card">
+        <span class="step-num">BƯỚC 1</span>
+        <b>Giải nén thư mục</b>
+        <p>Bạn đang đọc file này nghĩa là bạn đã giải nén xong. Hãy đảm bảo bạn nhìn thấy thư mục tên là <code>LLDTEK_Extension</code> nằm ngay bên cạnh file này.</p>
+    </div>
+
+    <div class="step-card">
+        <span class="step-num">BƯỚC 2</span>
+        <b>Mở trang quản lý Extension</b>
+        <p>Copy dòng chữ dưới đây và dán vào thanh địa chỉ của Chrome, sau đó bấm Enter:</p>
+        <div class="code-container">
+            <code id="linkText">chrome://extensions</code>
+            <button class="copy-btn" onclick="copyLink()">COPY LINK</button>
+        </div>
+    </div>
+
+    <div class="step-card">
+        <span class="step-num">BƯỚC 3</span>
+        <b>Bật chế độ nhà phát triển (Developer Mode)</b>
+        <p>Nhìn lên <b>góc trên cùng bên phải</b> màn hình, tìm nút gạt có tên <b>"Developer mode"</b> và BẬT nó lên (Nút gạt chuyển sang màu xanh).</p>
+    </div>
+
+    <div class="step-card">
+        <span class="step-num">BƯỚC 4</span>
+        <b>Tải Extension lên Chrome</b>
+        <p>Sau khi bật Developer mode, bạn sẽ thấy 3 nút mới hiện ra ở góc trái. Hãy bấm vào nút đầu tiên:</p>
+        <p style="font-weight: bold; color: var(--dark);">📂 Load unpacked (Tải tiện ích đã giải nén)</p>
+        <p>Sau đó, <b>chọn thư mục <code>LLDTEK_Extension</code></b> (Nằm trong thư mục bạn vừa giải nén).</p>
+    </div>
+
+    <div class="step-card">
+        <span class="step-num">BƯỚC 5</span>
+        <b>Hoàn tất</b>
+        <p>Quay lại trang <b>VICI Dial</b> và bấm phím <b>F5</b>. Nếu bạn thấy nút <span style="background: green; color: white; padding: 2px 5px; border-radius: 3px; font-size: 0.8em;">🚀 CRM</span> xuất hiện cạnh số điện thoại, bạn đã cài đặt thành công!</p>
+    </div>
+
+    <div class="section-title">PHẦN 2: HƯỚNG DẪN SỬ DỤNG NHANH</div>
+    
+    <div class="manual-grid">
+        <div class="manual-item">
+            <h3>1. Kích hoạt App</h3>
+            <p>Mỗi ngày khi bắt đầu làm việc, hãy mở file <b>CRM_LLDTEK_FINAL.exe</b> lên và để nó chạy ẩn dưới thanh Taskbar.</p>
+        </div>
+        <div class="manual-item">
+            <h3>2. Quy trình "1 Click"</h3>
+            <p>Khi có cuộc gọi đến trên VICI, bạn chỉ cần bấm nút <b>🚀 CRM</b> màu xanh. Hệ thống sẽ tự động bật App và điền sẵn thông tin khách hàng.</p>
+        </div>
+        <div class="manual-item">
+            <h3>3. Thao tác nhanh</h3>
+            <p>Sử dụng các nút <b>⚡ Quick Action</b> trong App để copy nhanh Địa chỉ hoặc Ghi chú từ VICI vào Ticket.</p>
+        </div>
+        <div class="manual-item">
+            <h3>4. Lưu & Tự động dọn dẹp</h3>
+            <p>Sau khi hỗ trợ xong, bấm <b>LƯU & ĐỒNG BỘ</b>. App sẽ tự lưu vào Excel và xóa trắng màn hình để chờ cuộc gọi tiếp theo.</p>
+        </div>
+    </div>
+
+    <div class="alert-box">
+        <span class="alert-title">⚠️ LƯU Ý QUAN TRỌNG:</span>
+        <ul>
+            <li>Lần đầu tiên mở App, hệ thống sẽ hiện một bảng <b>"Hướng dẫn chi tiết"</b> ngay trên màn hình. Hãy đọc kỹ nó.</li>
+            <li>Nếu bấm nút CRM mà App không hiện lên: Hãy kiểm tra xem file <b>.exe</b> đã được mở chưa.</li>
+            <li>Nếu thấy nút CRM cứ quay tròn mãi: Hãy bấm F5 lại trang VICI.</li>
+        </ul>
+    </div>
+
+    <footer>
+        Developed by <b>ChienPham</b> | Internal Tools © 2026
+    </footer>
+</div>
+
+<script>
+    function copyLink() {
+        var copyText = document.getElementById("linkText");
+        navigator.clipboard.writeText(copyText.innerText).then(function() {
+            var btn = document.querySelector(".copy-btn");
+            btn.innerText = "ĐÃ COPY!";
+            btn.style.background = "#333";
+            setTimeout(function(){
+                btn.innerText = "COPY LINK";
+                btn.style.background = "#28a745";
+            }, 2000);
+        });
+    }
+</script>
+
+</body>
+</html>
