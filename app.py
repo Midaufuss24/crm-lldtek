@@ -9,11 +9,43 @@ import re
 import pytz
 from urllib.parse import urlencode
 import plotly.express as px
+from PIL import Image, ImageDraw # Thêm thư viện vẽ ảnh
 
 # ==========================================
-# 1. CẤU HÌNH & IMPORT
+# 1. CẤU HÌNH & LOGO
 # ==========================================
-st.set_page_config(page_title="CRM - LLDTEK", page_icon="🏢", layout="wide")
+def create_tech_logo():
+    # 1. Tạo nền icon (256x256) màu Xanh Navy đậm (Tech Style)
+    img = Image.new('RGB', (256, 256), color=(10, 25, 47)) 
+    d = ImageDraw.Draw(img)
+    
+    # 2. Vẽ Mạng lưới kết nối (CRM Network)
+    # Tâm (128, 128)
+    # 3 Nhánh kết nối ra 3 hướng
+    # Nhánh 1: Lên trên
+    d.line([(128, 128), (128, 50)], fill=(200, 200, 200), width=8)
+    # Nhánh 2: Xuống trái
+    d.line([(128, 128), (60, 190)], fill=(200, 200, 200), width=8)
+    # Nhánh 3: Xuống phải
+    d.line([(128, 128), (196, 190)], fill=(200, 200, 200), width=8)
+    
+    # Vẽ các Node (Tròn)
+    # Node Trung tâm (To nhất - Màu Cyan)
+    d.ellipse([(98, 98), (158, 158)], fill=(0, 255, 255), outline=(255, 255, 255), width=3)
+    
+    # Node Vệ tinh (Nhỏ hơn - Màu Trắng)
+    d.ellipse([(108, 30), (148, 70)], fill=(255, 255, 255))   # Top
+    d.ellipse([(40, 170), (80, 210)], fill=(255, 255, 255))   # Left
+    d.ellipse([(176, 170), (216, 210)], fill=(255, 255, 255)) # Right
+    
+    return img
+
+# Cấu hình App với Logo tự vẽ
+try:
+    app_icon = create_tech_logo()
+    st.set_page_config(page_title="CRM - LLDTEK", page_icon=app_icon, layout="wide")
+except:
+    st.set_page_config(page_title="CRM - LLDTEK", page_icon="📡", layout="wide")
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -49,11 +81,6 @@ st.markdown("""
     .stApp { font-family: 'Segoe UI', sans-serif; }
     .stTextArea textarea, .stTextInput input { font-family: 'Consolas', monospace; font-weight: 500; border-radius: 5px; }
     div[data-testid="stTextInput"] input[aria-label="⚡ Nhập CID (Auto-Fill & Check):"] { border: 2px solid #ff4b4b; background-color: #fff0f0; color: black; font-weight: bold; }
-    .vici-box { background-color: #e6e6e6; color: #000; padding: 15px; border-radius: 5px; border: 1px solid #999; margin-bottom: 20px; font-family: Arial, sans-serif; }
-    .vici-title { color: #000080; font-weight: bold; font-size: 1.1em; margin-bottom: 10px; text-decoration: underline; }
-    .vici-row { display: flex; margin-bottom: 5px; flex-wrap: wrap; }
-    .vici-label { font-weight: bold; width: 90px; text-align: right; margin-right: 10px; color: #333; }
-    .vici-val { font-weight: bold; color: #000; flex: 1; border-bottom: 1px dotted #999; min-width: 150px; }
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
@@ -119,13 +146,8 @@ def construct_date_from_context(val, sheet_name, tab_name):
     file_year = "20" + match.group(2) if match else str(datetime.now().year)
     file_month = match.group(1) if match else "01"
     day_str = str(tab_name).strip()
-    
     if "/" in day_str and len(day_str) <= 5: return f"{day_str}/{file_year}"
-    
-    # --- FIX V141: Lấy đúng tháng từ tên file ---
-    if day_str.isdigit() and int(day_str) <= 31: 
-        return f"{file_month}/{day_str}/{file_year}" 
-    
+    if day_str.isdigit() and int(day_str) <= 31: return f"{file_month}/{day_str}/{file_year}" 
     return f"{tab_name}/{file_year}"
 
 def format_date_display(val):
@@ -476,7 +498,7 @@ def confirm_save_dialog(data_pack):
             success, msg = save_to_google_sheet(data_pack)
         if success: 
             st.toast("✅ Lưu thành công!", icon="✨")
-            clear_form() # Xóa sạch form
+            clear_form() 
             time.sleep(1)
             st.rerun()
         else: st.error(f"Lỗi GSheet: {msg}")
@@ -485,75 +507,118 @@ if menu == "🆕 New Ticket":
     st.title("🆕 Tạo Ticket Mới")
     houston_now = get_company_time()
     
-    # --- LOGIC MỚI: XỬ LÝ DỮ LIỆU TỪ VICI ---
+    # --- PHẦN 1: XỬ LÝ DỮ LIỆU VICI & UI/UX HIỆN ĐẠI ---
     qp = st.query_params
     
-    # Chỉ xử lý khi có params truyền vào (Lúc vừa bấm nút CRM)
+    # 1.1. Bắt dữ liệu từ URL và lưu vào Session State
     if any(k in qp for k in ["phone", "address", "comments", "first"]):
+        st.session_state.vici_cache = {
+            "title": qp.get("title", ""),
+            "first": qp.get("first", ""),
+            "last": qp.get("last", ""),
+            "address": qp.get("address", ""),
+            "city": qp.get("city", ""),
+            "state": qp.get("state", ""),
+            "zip": qp.get("zip", ""),
+            "vendor_id": qp.get("vendor_id", ""),
+            "phone": qp.get("phone", ""),
+            "alt_phone": qp.get("alt_phone", ""),
+            "email": qp.get("email", ""),
+            "comments": qp.get("comments", ""),
+            "user": qp.get("user", "")
+        }
         
-        # 1. Lấy dữ liệu thô
-        v_data = {k: qp.get(k, "") for k in ["title", "first", "last", "address", "city", "state", "zip", "vendor_id", "phone", "alt_phone", "email", "comments", "user"]}
+        # Auto-fill cơ bản
+        if st.session_state.vici_cache['phone']: 
+            st.session_state.ticket_phone = st.session_state.vici_cache['phone']
+        st.session_state.ticket_owner = st.session_state.vici_cache['user']
         
-        # 2. HIỂN THỊ KHUNG THÔNG TIN VICI
-        st.markdown(f"""
-        <div class="vici-box">
-            <div class="vici-title">Customer Information: LEAD SEARCH</div>
-            <div class="vici-row">
-                <div class="vici-label">Title:</div><div class="vici-val">{v_data['title']}</div>
-                <div class="vici-label">First:</div><div class="vici-val">{v_data['first']}</div>
-                <div class="vici-label">Last:</div><div class="vici-val">{v_data['last']}</div>
-            </div>
-            <div class="vici-row"><div class="vici-label">Address:</div><div class="vici-val" style="color:#000080;">{v_data['address']}</div></div>
-            <div class="vici-row">
-                <div class="vici-label">City:</div><div class="vici-val">{v_data['city']}</div>
-                <div class="vici-label">State:</div><div class="vici-val">{v_data['state']}</div>
-                <div class="vici-label">PostCode:</div><div class="vici-val">{v_data['zip']}</div>
-            </div>
-            <div class="vici-row"><div class="vici-label">Vendor ID:</div><div class="vici-val">{v_data['vendor_id']}</div></div>
-            <div class="vici-row">
-                <div class="vici-label">Phone:</div><div class="vici-val" style="color:red; font-size:1.1em;">{v_data['phone']}</div>
-                <div class="vici-label">Alt Phone:</div><div class="vici-val">{v_data['alt_phone']}</div>
-            </div>
-             <div class="vici-row"><div class="vici-label">Email:</div><div class="vici-val">{v_data['email']}</div></div>
-            <div class="vici-row"><div class="vici-label">Comments:</div><div class="vici-val">{v_data['comments']}</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 3. AUTO FILL (TỰ ĐIỀN VÀO FORM)
-        if v_data['phone']: 
-            st.session_state.ticket_phone = v_data['phone']
-        st.session_state.ticket_owner = v_data['user']
-        
+        # Logic tách CID
         def smart_parse(text):
             if not text: return None, None
-            # Tìm chuỗi số 4-6 ký tự
-            match = re.search(r'\b(\d{4,6})\b', text)
+            match = re.search(r'\b(\d{4,6})\b', text) 
             if match:
                 cid = match.group(1)
                 name = text[:match.start()].strip(' -:,|#').strip()
                 return cid, name
             return None, text 
 
-        # Ưu tiên lấy từ Address -> Comments
-        f_cid, f_name = smart_parse(v_data['address'])
-        if not f_cid:
-            f_cid, f_name = smart_parse(v_data['comments'])
+        # Thử điền tên tiệm/CID
+        if not st.session_state.ticket_cid:
+            f_cid, f_name = smart_parse(st.session_state.vici_cache['address'])
+            if not f_cid: f_cid, f_name = smart_parse(st.session_state.vici_cache['comments'])
             
-        if f_cid: 
-            st.session_state.ticket_cid = f_cid
-            if f_name: st.session_state.ticket_salon = f_name
-            st.toast(f"✨ Auto-Detected: {f_name} (CID: {f_cid})", icon="🤖")
-        elif f_name and len(f_name) > 2:
-             st.session_state.ticket_salon = f_name
+            if f_cid: 
+                st.session_state.ticket_cid = f_cid
+                if f_name: st.session_state.ticket_salon = f_name
+                st.toast(f"🤖 Auto-Detected: {f_name} (CID: {f_cid})")
 
-        # 4. QUAN TRỌNG: Xóa Params để tránh lưu xong bị hiện lại
+        # Xóa URL
         st.query_params.clear()
 
-    # --- PHẦN FORM NHẬP LIỆU (LOGIC CŨ) ---
+    # 1.2. HIỂN THỊ UI/UX
+    if 'vici_cache' in st.session_state and st.session_state.vici_cache:
+        v = st.session_state.vici_cache
+        
+        with st.expander(f"📡 DỮ LIỆU VICI: {v['first']} {v['last']} - {v['phone']} (Click để mở)", expanded=True):
+            
+            # Hàng 1: Nút Quick Action
+            st.markdown("##### ⚡ Thao tác nhanh:")
+            c_act1, c_act2, c_act3, c_act4 = st.columns(4)
+            
+            if c_act1.button("🏢 Lấy Address làm Tên Tiệm", use_container_width=True):
+                st.session_state.ticket_salon = v['address']
+                st.rerun()
+            
+            if c_act2.button("📝 Chép Comment vào Note", use_container_width=True):
+                st.session_state.ticket_note = (str(st.session_state.ticket_note) + "\n" + v['comments']).strip()
+                st.rerun()
+                
+            if c_act3.button("🆔 Lấy Vendor ID làm CID", use_container_width=True):
+                st.session_state.ticket_cid = v['vendor_id']
+                st.rerun()
+                
+            if c_act4.button("🗑️ Xóa dữ liệu VICI", use_container_width=True):
+                del st.session_state.vici_cache
+                st.rerun()
+
+            st.markdown("---")
+
+            # Hàng 2: Grid Info
+            col_info1, col_info2 = st.columns([1, 1])
+            with col_info1:
+                st.info("**👤 Thông tin cá nhân**")
+                st.markdown(f"""
+                - **Name:** {v['title']} {v['first']} {v['last']}
+                - **Phone:** `{v['phone']}`
+                - **Alt Phone:** `{v['alt_phone']}`
+                - **Email:** {v['email']}
+                """)
+            with col_info2:
+                st.warning("**📍 Địa chỉ & Hệ thống**")
+                st.markdown(f"""
+                - **Address:** {v['address']}
+                - **City/State:** {v['city']}, {v['state']} {v['zip']}
+                - **Vendor ID:** `{v['vendor_id']}`
+                """)
+            
+            # Phần Comments
+            if v['comments']:
+                st.error("**💬 Comments / Ghi chú từ VICI:**")
+                st.code(v['comments'], language="text")
+
+    # --- PHẦN 2: FORM NHẬP LIỆU ---
     if st.session_state.ticket_start_time is None: st.session_state.ticket_start_time = houston_now
     start_time_display = format_excel_time(st.session_state.ticket_start_time)
-    st.markdown(f"""<div class="timer-box">⏱️ TICKET ĐANG GHI NHẬN TỪ: {start_time_display} (Houston)</div>""", unsafe_allow_html=True)
     
+    st.markdown(f"""
+    <div style="padding: 10px; background-color: #262730; border-radius: 5px; border: 1px solid #4e4f57; text-align: center; margin-bottom: 20px;">
+        <span style="font-size: 1.2em;">⏱️</span> 
+        <span style="font-weight: bold; color: #ff4b4b;">TICKET STARTED:</span> 
+        <span style="font-family: monospace; font-size: 1.2em;">{start_time_display} (Houston)</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     col_af1, col_af2 = st.columns([1, 2])
     auto_cid = col_af1.text_input("⚡ Nhập CID (Auto-Fill & Check):", value=st.session_state.ticket_cid, placeholder="VD: 07562", key="input_cid_trigger")
     if auto_cid and st.session_state.ticket_cid != auto_cid:
@@ -594,6 +659,10 @@ if menu == "🆕 New Ticket":
             start_dt = st.session_state.ticket_start_time if st.session_state.ticket_start_time else end_dt
             start_time_str = format_excel_time(start_dt); dt_str = start_dt.strftime('%m/%d/%Y')
             data_pack = {'Date_Obj': start_dt, 'Date_Str': dt_str, 'Salon_Name': salon, 'Agent_Name': sel_agent, 'Support_Time': start_time_str, 'End_Time': end_time_str, 'Phone': phone, 'CID': cid, 'Note': note_content, 'Status': status, 'Caller_Info': caller, 'Ticket_Type': ticket_type, 'Training_Note': train_note, 'Card_16_Digits': card_info}
+            
+            # Xóa cache VICI sau khi lưu
+            if 'vici_cache' in st.session_state: del st.session_state.vici_cache
+            
             confirm_save_dialog(data_pack)
         else: st.warning("⚠️ Vui lòng nhập ít nhất Số điện thoại.")
 
@@ -609,7 +678,6 @@ elif menu == "🗂️ Tra cứu Master Data":
             col_s1, col_s2 = st.columns([3, 1])
             search_term = col_s1.text_input("Nhập CID hoặc Tên Tiệm:", placeholder="VD: 07562")
             
-            # --- SESSION STATE ---
             if 'search_result_df' not in st.session_state: st.session_state.search_result_df = None
             
             enable_bot = st.checkbox("Bot Online", value=True)
@@ -631,11 +699,9 @@ elif menu == "🗂️ Tra cứu Master Data":
                                 st.session_state.search_result_df = run_search_engine(search_term)
                 else: st.warning("Vui lòng nhập từ khóa.")
 
-            # --- HIỂN THỊ KẾT QUẢ ---
             if st.session_state.search_result_df is not None:
                 if isinstance(st.session_state.search_result_df, pd.DataFrame) and not st.session_state.search_result_df.empty:
                     st.success(f"✅ Bot tìm thấy kết quả:"); st.dataframe(st.session_state.search_result_df, use_container_width=True)
-                    
                     if st.button("💾 Lưu kết quả vào Database"):
                         success, msg = save_to_master_db_gsheet(st.session_state.search_result_df)
                         if success: 
