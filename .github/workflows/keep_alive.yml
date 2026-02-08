@@ -1,0 +1,14 @@
+name: Keep Streamlit Alive
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # Chạy mỗi 15 phút
+  workflow_dispatch: # Cho phép bấm chạy thủ công
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping App
+        run: |
+          curl -I https://crm-lldtek.streamlit.app
