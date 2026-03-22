@@ -1,3 +1,17 @@
+# ==========================================
+# PYINSTALLER DEPENDENCY ANCHORS (CHỐNG LỖI THIẾU MODULE)
+# Ép PyInstaller phải nạp các thư viện này vào file .exe
+# ==========================================
+import sys
+if getattr(sys, 'frozen', False):
+    import gspread
+    import google.auth
+    import google.oauth2.service_account
+    import pandas
+    import plotly
+    import sqlite3
+    import pytz
+
 import streamlit as st
 import sqlite3
 import pandas as pd

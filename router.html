@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLDTEK CRM - Smart Router</title>
+    <style>
+        body {
+            background-color: #0e1117;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .loader {
+            border: 5px solid #30363d;
+            border-top: 5px solid #4CAF50;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-text {
+            font-size: 18px;
+            color: #c9d1d9;
+            font-weight: 500;
+        }
+        .highlight {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="loader"></div>
+    <div class="status-text" id="statusMsg">🚀 Đang tìm tuyến đường nhanh nhất (Ping Local)...</div>
+
+    <script>
+        // =========================================================================
+        // CẤU HÌNH HỆ THỐNG ROUTING (CHIẾN CẦN THAY ĐỔI IP Ở ĐÂY)
+        // =========================================================================
+        
+        // 1. Nhập IP LAN của máy tính Chiến (VD: 192.168.1.45 hoặc 10.0.0.5)
+        // Lưu ý: Đảm bảo cổng 8501 trên máy Chiến đã được mở Firewall (Inbound Rules)
+        const local_IP = "172.16.0.123"; 
+        const local_Port = "8501";
+        
+        // 2. Link Cloud dự phòng (Giữ nguyên)
+        const cloud_URL = "https://lldtek-crm.streamlit.app";
+        
+        // 3. Lấy toàn bộ tham số từ VICI (VD: ?user=1234&phone=0987...)
+        const queryString = window.location.search;
+
+        const localBaseUrl = `http://${local_IP}:${local_Port}`;
+        const localHealthCheckUrl = `${localBaseUrl}/healthz`; // Endpoint kiểm tra sức khỏe của Streamlit
+        const targetLocalUrl = `${localBaseUrl}/${queryString}`;
+        const targetCloudUrl = `${cloud_URL}/${queryString}`;
+
+        // =========================================================================
+        // LOGIC PING & CHUYỂN HƯỚNG THÔNG MINH
+        // =========================================================================
+        async function routeTraffic() {
+            const statusEl = document.getElementById("statusMsg");
+            
+            try {
+                // Thiết lập Timeout 1.5 giây để không làm nhân viên chờ lâu
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 1500);
+
+                // Gửi request 'ping' đến máy Local
+                const response = await fetch(localHealthCheckUrl, { 
+                    mode: 'no-cors', // Streamlit local không có SSL, dùng no-cors để ping qua mạng LAN
+                    signal: controller.signal 
+                });
+
+                clearTimeout(timeoutId);
+
+                // NẾU PING THÀNH CÔNG -> MÁY CHIẾN ĐANG MỞ APP
+                statusEl.innerHTML = `✅ Đã kết nối <span class="highlight">LOCAL SERVER</span>. Đang chuyển hướng...`;
+                setTimeout(() => {
+                    window.location.replace(targetLocalUrl);
+                }, 300);
+
+            } catch (error) {
+                // NẾU PING THẤT BẠI (Timeout, máy tắt, rớt mạng) -> FALLBACK LÊN CLOUD
+                statusEl.innerHTML = `⚠️ Local Server Offline. Đang chuyển sang <span class="highlight">CLOUD SERVER</span>...`;
+                setTimeout(() => {
+                    window.location.replace(targetCloudUrl);
+                }, 300);
+            }
+        }
+
+        // Bắt đầu quá trình Routing ngay khi load file
+        window.onload = routeTraffic;
+    </script>
+
+</body>
+</html>

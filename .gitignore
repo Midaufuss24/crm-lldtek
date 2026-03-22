@@ -1,5 +1,20 @@
+# Bỏ qua môi trường ảo
+.venv/
+venv/
+env/
+
+# Bỏ qua các file đóng gói và file chạy
 dist/
 build/
 *.spec
 *.exe
+
+# Bỏ qua file rác của Python
 __pycache__/
+*.pyc
+
+# Bỏ qua database cục bộ (nếu bạn muốn Cloud tạo DB mới tinh)
+# crm_data.db 
+
+# Bỏ qua file cấu hình bảo mật local
+.streamlit/secrets.toml
