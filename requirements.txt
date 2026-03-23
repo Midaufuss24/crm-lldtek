@@ -1,10 +1,10 @@
 streamlit
+google-generativeai
 pandas
-plotly
 gspread
 google-auth
-openpyxl
-beautifulsoup4
-webdriver-manager
+plotly
+pytz
+Pillow
 selenium
-lxml
+webdriver-manager

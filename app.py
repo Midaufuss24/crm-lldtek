@@ -1,17 +1,5 @@
-# ==========================================
-# PYINSTALLER DEPENDENCY ANCHORS (CHỐNG LỖI THIẾU MODULE)
-# Ép PyInstaller phải nạp các thư viện này vào file .exe
-# ==========================================
 import sys
-if getattr(sys, 'frozen', False):
-    import gspread
-    import google.auth
-    import google.oauth2.service_account
-    import pandas
-    import plotly
-    import sqlite3
-    import pytz
-
+import google.generativeai as genai
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -26,9 +14,68 @@ import plotly.express as px
 from PIL import Image, ImageDraw
 import streamlit.components.v1 as components
 
+# Ép nạp thư viện khi đóng gói file .exe
+if getattr(sys, 'frozen', False):
+    import gspread, google.auth, google.oauth2.service_account, pandas, plotly, sqlite3, pytz
+
 # ==========================================
-# 1. CẤU HÌNH & LOGO & ONBOARDING
+# CẤU HÌNH AI - BẢN CINEMA MODE & TRÍ NHỚ (v2.5)
 # ==========================================
+GOOGLE_API_KEY = "AIzaSyCbySj19PNjkVHcpCYR5U8OnrjGM2cb3AQ"
+genai.configure(api_key=GOOGLE_API_KEY)
+
+@st.dialog("🤖 LLDTEK AI ASSISTANT - CINEMA MODE", width="large")
+def ai_assistant_dialog(initial_issue):
+    # CSS ép Dialog to toàn màn hình và tùy chỉnh vị trí nhập liệu
+    st.markdown("""
+        <style>
+            div[data-testid="stDialog"] div[role="dialog"] { width: 95vw; max-width: 95vw; height: 90vh; }
+            .stChatFloatingInputContainer { bottom: 20px; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Khởi tạo Trí nhớ theo chuẩn Gemini (user/model)
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "user", "parts": [f"Tôi cần hỗ trợ lỗi này: {initial_issue}"]},
+            {"role": "model", "parts": ["Chào Chiến! Tôi đã nắm thông tin lỗi. Bạn có ảnh chụp lỗi hay câu hỏi nào thêm không?"]}
+        ]
+
+    # Khung chat tự cuộn với chiều cao cố định
+    chat_box = st.container(height=500)
+    with chat_box:
+        for msg in st.session_state.messages:
+            role = "assistant" if msg["role"] == "model" else "user"
+            with st.chat_message(role):
+                st.markdown(msg["parts"][0])
+
+    # Khu vực tương tác Đa phương thức
+    uploaded_file = st.file_uploader("📸 Đính kèm ảnh lỗi (AI sẽ phân tích hình ảnh):", type=["jpg", "png", "jpeg"])
+    
+    if prompt := st.chat_input("Nhập câu hỏi tiếp theo..."):
+        st.session_state.messages.append({"role": "user", "parts": [prompt]})
+        with chat_box:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+        with chat_box:
+            with st.chat_message("assistant"):
+                try:
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    if uploaded_file:
+                        img = Image.open(uploaded_file)
+                        st.image(img, width=300)
+                        response = model.generate_content([prompt, img])
+                    else:
+                        # Chat có trí nhớ (Gửi kèm lịch sử)
+                        chat_session = model.start_chat(history=st.session_state.messages[:-1])
+                        response = chat_session.send_message(prompt)
+
+                    st.markdown(response.text)
+                    st.session_state.messages.append({"role": "model", "parts": [response.text]})
+                except Exception as e:
+                    st.error(f"❌ Lỗi: {str(e)}")
+        st.rerun()
 def create_tech_logo():
     img = Image.new('RGB', (256, 256), color=(10, 25, 47)) 
     d = ImageDraw.Draw(img)
@@ -914,8 +961,12 @@ def confirm_save_dialog(data_pack, is_duplicate=False):
         with st.spinner("⏳ Đang đồng bộ Google Sheet..."):
             success, msg = save_to_google_sheet(data_pack)
         if success: 
-            st.toast("✅ Lưu thành công! Khởi tạo form mới...", icon="✨")
-            clear_form() # Tăng Key lên 1 để đập bỏ form cũ
+            # --- TỰ ĐỘNG RESET AI CHO TIỆM TIẾP THEO ---
+            if "messages" in st.session_state:
+                del st.session_state.messages
+            
+            st.toast("✅ Đã lưu Ticket & Reset Trí nhớ AI!", icon="✨")
+            clear_form()
             time.sleep(0.5)
             st.rerun() 
         else: 
@@ -1121,9 +1172,20 @@ if menu == "🆕 New Ticket":
         iso_val, train_note, demo_note, card_info, note_content = "", "", "", "", ""
         status_opts = ["Support", "Done", "No Answer"]
         
+        # THAY THẾ TỪ DÒNG 1178
         if ticket_type == "Report (Hỗ trợ)": 
-            new_note = st.text_area("Chi tiết hỗ trợ *", key=f"ticket_note_{fk}", height=180)
-            note_content = new_note
+            c_note, c_ai = st.columns([1.2, 1])
+            with c_note:
+                new_note = st.text_area("Chi tiết hỗ trợ *", key=f"ticket_note_{fk}", height=250)
+                note_content = new_note
+            with c_ai:
+                st.markdown("🤖 **AI Trợ lý Kỹ thuật (v2.5)**")
+                st.caption("Chat & Gửi ảnh lỗi cho AI")
+                if st.button("💡 GIẢI MÃ LỖI VỚI AI CHAT", type="primary", use_container_width=True):
+                    if new_note:
+                        ai_assistant_dialog(new_note)
+                    else:
+                        st.warning("⚠️ Vui lòng nhập nội dung lỗi trước.")
         elif ticket_type == "Training": 
             col_iso, col_other = st.columns([1, 1])
             iso_opt = col_iso.selectbox("ISO", ["Spoton", "1ST", "TMS", "TMDSpoton", "Khác"])
